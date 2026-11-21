@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: ezbikes-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ezbikes}
+    username: ${SPRING_DATASOURCE_USERNAME:ezbikes}
+    password: ${SPRING_DATASOURCE_PASSWORD:ezbikes}
+    hikari:
+      maximum-pool-size: 10
+      pool-name: ezbikes-pool
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: EZBikes API
+    description: E-commerce de bicicletas observável
