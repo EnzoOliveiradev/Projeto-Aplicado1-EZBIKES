@@ -25,6 +25,9 @@ server:
   shutdown: graceful
 
 ezbikes:
+  environment: ${EZBIKES_ENVIRONMENT:local}
+  logging:
+    logstash-destination: ${EZBIKES_LOGSTASH_DESTINATION:logstash:50000}
   payment:
     # Probabilidade de falha do gateway simulado (0 a 1). Ajustável em runtime a partir do dia 6 (chaos).
     failure-rate: ${EZBIKES_PAYMENT_FAILURE_RATE:0.0}

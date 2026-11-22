@@ -31,6 +31,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """, nativeQuery = true)
     int decrementStock(@Param("id") long id, @Param("qty") int qty);
 
+    @Query("select p.stock from Product p where p.id = :id")
+    int findStockById(@Param("id") long id);
+
     /** Devolve unidades ao estoque (por exemplo, quando o pagamento falha). */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """

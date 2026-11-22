@@ -5,8 +5,12 @@ import br.com.ezbikes.catalog.Product;
 import br.com.ezbikes.catalog.ProductRepository;
 import br.com.ezbikes.common.BusinessRuleException;
 import br.com.ezbikes.common.NotFoundException;
+import br.com.ezbikes.observability.PiiMasker;
 import br.com.ezbikes.payment.PaymentFailedException;
 import br.com.ezbikes.payment.PaymentGateway;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -18,6 +22,8 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static net.logstash.logback.argument.StructuredArguments.kv;
+
 /**
  * Checkout em três etapas, cada uma com sua própria transação curta:
  *
@@ -27,9 +33,17 @@ import java.util.stream.Collectors;
  *       conexões do pool enquanto espera uma dependência externa;</li>
  *   <li><b>Conclusão</b>: marca PAID, ou PAYMENT_FAILED devolvendo o estoque.</li>
  * </ol>
+ *
+ * <p>Cada etapa emite um evento de negócio estruturado ({@code event.action}) com o
+ * {@code order_id} no MDC, o que permite reconstruir a história de um pedido no Kibana.
  */
 @Service
 public class OrderService {
+
+    static final int LOW_STOCK_THRESHOLD = 3;
+    static final String ORDER_ID = "order_id";
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final ProductRepository products;
     private final OrderRepository orders;
@@ -53,18 +67,34 @@ public class OrderService {
 
         Order reserved = tx.execute(status -> reserve(request, quantities));
 
-        try {
-            payments.charge(reserved.getId(), reserved.getTotal());
-        } catch (PaymentFailedException e) {
-            tx.executeWithoutResult(status -> failAndReleaseStock(reserved.getId()));
-            throw e.forOrder(reserved.getId());
-        }
+        try (var ignored = MDC.putCloseable(ORDER_ID, reserved.getId().toString())) {
+            log.info("Pedido criado com estoque reservado",
+                    kv("event.action", "order.created"),
+                    kv("order_total", reserved.getTotal()),
+                    kv("items_count", reserved.getItems().size()),
+                    kv("customer_email", PiiMasker.maskEmail(reserved.getCustomerEmail())));
 
-        OrderResponse paid = tx.execute(status -> markPaid(reserved.getId()));
-        if (request.cartId() != null) {
-            carts.clear(request.cartId());
+            try {
+                payments.charge(reserved.getId(), reserved.getTotal());
+            } catch (PaymentFailedException e) {
+                tx.executeWithoutResult(status -> failAndReleaseStock(reserved.getId()));
+                log.error("Falha no pagamento; pedido cancelado e estoque devolvido",
+                        kv("event.action", "order.payment_failed"),
+                        kv("payment_reason", e.getReason()),
+                        kv("order_total", reserved.getTotal()));
+                throw e.forOrder(reserved.getId());
+            }
+
+            OrderResponse paid = tx.execute(status -> markPaid(reserved.getId()));
+            log.info("Pagamento aprovado",
+                    kv("event.action", "order.paid"),
+                    kv("order_total", paid.total()));
+
+            if (request.cartId() != null) {
+                carts.clear(request.cartId());
+            }
+            return paid;
         }
-        return paid;
     }
 
     public OrderResponse get(UUID id) {
@@ -102,12 +132,28 @@ public class OrderService {
         quantities.forEach((productId, quantity) -> {
             Product product = byId.get(productId);
             if (products.decrementStock(productId, quantity) == 0) {
+                log.warn("Pedido rejeitado por estoque insuficiente",
+                        kv("event.action", "order.rejected_out_of_stock"),
+                        kv("sku", product.getSku()),
+                        kv("requested_qty", quantity),
+                        kv("available_qty", product.getStock()));
                 // A exceção desfaz a transação inteira, inclusive as baixas já feitas.
                 throw new OutOfStockException(product.getSku(), quantity, product.getStock());
             }
             order.addItem(productId, product.getSku(), product.getPrice(), quantity);
+            warnIfLowStock(productId, product.getSku());
         });
         return orders.save(order);
+    }
+
+    private void warnIfLowStock(long productId, String sku) {
+        int remaining = products.findStockById(productId);
+        if (remaining < LOW_STOCK_THRESHOLD) {
+            log.warn("Estoque baixo",
+                    kv("event.action", "stock.low"),
+                    kv("sku", sku),
+                    kv("stock_remaining", remaining));
+        }
     }
 
     private void failAndReleaseStock(UUID orderId) {

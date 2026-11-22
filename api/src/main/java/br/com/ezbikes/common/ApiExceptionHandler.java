@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import static net.logstash.logback.argument.StructuredArguments.kv;
+
 /**
  * Converte exceções em respostas RFC 7807 (application/problem+json).
  *
@@ -54,7 +56,10 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ProblemDetail unexpected(Exception ex) {
-        log.error("Erro inesperado ao processar requisição", ex);
+        log.error("Erro inesperado ao processar requisição",
+                kv("event.action", "error.unexpected"),
+                kv("error_type", ex.getClass().getSimpleName()),
+                ex);
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Erro interno",
                 "Ocorreu um erro inesperado. Tente novamente mais tarde.");
     }

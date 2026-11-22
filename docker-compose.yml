@@ -1,6 +1,7 @@
 name: ezbikes
 
 services:
+  # ---------------------------------------------------------------- Aplicação
   postgres:
     image: postgres:16
     environment:
@@ -24,11 +25,96 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-ezbikes}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-ezbikes}
       SPRING_PROFILES_ACTIVE: demo
+      EZBIKES_ENVIRONMENT: demo
+      EZBIKES_LOGSTASH_DESTINATION: logstash:50000
+      # Probabilidade de falha do gateway de pagamento simulado (0 a 1).
+      EZBIKES_PAYMENT_FAILURE_RATE: ${EZBIKES_PAYMENT_FAILURE_RATE:-0.0}
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+    # Sem dependência do Logstash de propósito: a loja não pode parar porque o
+    # pipeline de logs caiu. O appender reconecta sozinho quando o Logstash volta.
+
+  # ---------------------------------------------------------------- Logs (ELK)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    mem_limit: 1200m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.0
+    environment:
+      - LS_JAVA_OPTS=-Xms256m -Xmx256m
+      - XPACK_MONITORING_ENABLED=false
+    volumes:
+      - ./observability/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    ports:
+      - "50000:50000"
+    mem_limit: 800m
+    depends_on:
+      elk-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9600/_node/pipelines/main >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - TELEMETRY_OPTIN=false
+    ports:
+      - "5601:5601"
+    mem_limit: 1000m
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5601/api/status | grep -q '\"level\":\"available\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+
+  # Execuções únicas de configuração (ver observability/elk/setup.sh).
+  # Template e retenção precisam existir antes de o Logstash criar o primeiro índice.
+  elk-setup:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["sh", "/setup/setup.sh"]
+    command: ["elasticsearch"]
+    volumes:
+      - ./observability/elk/setup.sh:/setup/setup.sh:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: "no"
+
+  kibana-setup:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["sh", "/setup/setup.sh"]
+    command: ["kibana"]
+    volumes:
+      - ./observability/elk/setup.sh:/setup/setup.sh:ro
+    depends_on:
+      kibana:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   pg_data:
+  es_data:

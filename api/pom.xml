@@ -44,6 +44,13 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Logs estruturados em JSON (formato Logstash) -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.1</version>
+        </dependency>
+
         <!-- Banco de dados e migrações -->
         <dependency>
             <groupId>org.flywaydb</groupId>

@@ -10,7 +10,7 @@
 |---|---|
 | Esqueleto Spring Boot, Docker Compose, PostgreSQL, Flyway e catálogo inicial | ✅ |
 | Carrinho, pedidos, estoque transacional e tratamento de erros | ✅ |
-| Logs JSON + ELK (Elasticsearch, Logstash, Kibana) | ⏳ |
+| Logs JSON + ELK (Elasticsearch, Logstash, Kibana) | ✅ |
 | Métricas (Actuator, Micrometer, Prometheus) e recording rules | ⏳ |
 | Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ⏳ |
 | Injeção de falhas e testes de carga com k6 | ⏳ |
@@ -37,11 +37,16 @@
 flowchart LR
     U[Cliente] --> API[EZBikes API<br/>Spring Boot 3 · Java 21]
     API --> DB[(PostgreSQL 16)]
+    API -- "logs JSON (TCP 50000)" --> LS[Logstash]
+    LS --> ES[(Elasticsearch)]
+    ES --> KB[Kibana]
 ```
 
 ## Como executar
 
-Pré-requisito: Docker com Docker Compose. Não é preciso ter Java nem Maven instalados, porque a API é compilada dentro do container.
+Pré-requisitos: Docker com Docker Compose e **pelo menos 4 GB de memória** disponíveis para o Docker (o Elasticsearch, o Logstash e o Kibana são os serviços mais pesados). Não é preciso ter Java nem Maven instalados, porque a API é compilada dentro do container.
+
+A primeira subida leva alguns minutos: o Kibana demora a ficar disponível.
 
 ```bash
 docker compose up -d --build
@@ -52,6 +57,8 @@ docker compose up -d --build
 | Catálogo (API) | http://localhost:8080/api/products |
 | Filtro por categoria/marca | http://localhost:8080/api/products?category=MTB&brand=Caloi |
 | Health check | http://localhost:8080/actuator/health |
+| Kibana (logs) | http://localhost:5601 → Discover → data view **EZBikes - logs** |
+| Elasticsearch | http://localhost:9200 |
 
 Para parar e apagar os dados: `docker compose down -v`.
 
@@ -95,6 +102,46 @@ Os erros seguem o formato RFC 7807 (`application/problem+json`). A classificaç�
 | Falha do gateway de pagamento | 502 | **Sim** |
 | Erro inesperado | 500 | **Sim** |
 
+## Logs estruturados e ELK
+
+Todos os logs saem em **JSON** (`logstash-logback-encoder`), no console e, no profile `demo` do compose, também via TCP para o Logstash. O Logstash grava em índices diários `app-logs-AAAA.MM.DD`.
+
+**Campos principais**
+
+| Campo | Origem | Exemplo |
+|---|---|---|
+| `@timestamp`, `level`, `message`, `logger` | Logback | `ERROR` |
+| `service`, `environment` | fixos | `ezbikes-api`, `demo` |
+| `trace_id` | `X-Request-Id` recebido ou gerado (MDC) | `demo-order-0004` |
+| `http.method`, `http.path` | MDC | `POST`, `/api/orders` |
+| `http.status`, `http.duration_ms` | log de acesso (numéricos) | `502`, `87` |
+| `event.action` | eventos de negócio (nome do ECS) | `order.payment_failed` |
+| `order_id` | MDC durante o checkout | UUID do pedido |
+| `order_total`, `items_count`, `sku`, `payment_reason`, `stock_remaining` | argumentos estruturados | `5999.00` |
+| `customer_email` | **mascarado** | `m***@example.com` |
+
+**Eventos de negócio:** `order.created`, `order.paid`, `order.payment_failed` (ERROR), `order.rejected_out_of_stock` (WARN), `stock.low` (WARN, estoque abaixo de 3), `error.unexpected` (ERROR) e `http.access` (um por requisição; WARN para 5xx).
+
+A API devolve o `trace_id` no cabeçalho `X-Request-Id`, para o cliente informar ao suporte. Requisições a `/actuator/**` (health check e scraping) ficam fora do log de acesso para não gerar ruído.
+
+**Consultas KQL úteis no Kibana**
+
+```
+level: "ERROR"
+event.action: "order.payment_failed"
+order_id: "<id do pedido>"                 # história completa de um pedido
+trace_id: "<X-Request-Id>"                  # todos os logs de uma requisição
+http.status >= 500
+http.duration_ms > 100 and http.path: "/api/orders"
+event.action: "stock.low"
+```
+
+**Privacidade (LGPD):** o e-mail é mascarado na aplicação (`PiiMasker`) e, como segunda camada, o Logstash mascara qualquer e-mail que chegue em texto claro no campo `message` e descarta o `event.original` (a linha bruta). O nome do cliente nunca é registrado nos logs. A resposta da API também não devolve o e-mail.
+
+**Retenção e custo:** o serviço `elk-setup` cria uma política ILM que **apaga índices com mais de 7 dias** e um index template com os tipos de cada campo (`http.status` numérico, IDs como `keyword`), 1 shard e 0 réplicas (nó único). O `kibana-setup` cria a data view. Os dois rodam uma vez a cada `docker compose up` e são idempotentes.
+
+**Resiliência:** a API não depende do Logstash para subir. Se o pipeline de logs cair, a loja continua atendendo e o appender reconecta sozinho.
+
 ## Testes
 
 ```bash
@@ -102,7 +149,7 @@ cd api
 ./mvnw verify
 ```
 
-Os testes de integração usam **Testcontainers** com PostgreSQL 16 real e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
+Os testes de integração usam **Testcontainers** com PostgreSQL 16 real. Eles verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
 
 Sem Java instalado, rode os testes dentro de um container Maven:
 
@@ -117,6 +164,8 @@ docker run --rm -v "$PWD":/w -v ezbikes-m2:/root/.m2 \
 ## Estrutura
 
 ```
-api/                 API Spring Boot (código, migrações Flyway, Dockerfile)
-docker-compose.yml   Orquestração local
+api/                        API Spring Boot (código, migrações Flyway, Dockerfile)
+observability/logstash/     Pipeline do Logstash
+observability/elk/setup.sh  Retenção (ILM), index template e data view do Kibana
+docker-compose.yml          Orquestração local
 ```
