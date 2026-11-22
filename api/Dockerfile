@@ -19,10 +19,11 @@ COPY --from=build /build/target/ezbikes-api.jar app.jar
 RUN chown -R app:app /app
 USER app
 
-EXPOSE 8080
+# 8080: loja/API pública · 8081: Actuator (health e métricas), só para a rede interna
+EXPOSE 8080 8081
 ENV JAVA_OPTS="-Xms128m -Xmx384m"
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=40s --retries=5 \
-  CMD curl -fsS http://localhost:8080/actuator/health/readiness || exit 1
+  CMD curl -fsS http://localhost:8081/actuator/health/readiness || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

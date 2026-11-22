@@ -4,6 +4,7 @@ import br.com.ezbikes.catalog.Product;
 import br.com.ezbikes.catalog.ProductRepository;
 import br.com.ezbikes.common.BusinessRuleException;
 import br.com.ezbikes.common.NotFoundException;
+import br.com.ezbikes.observability.BusinessMetrics;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,17 +34,18 @@ public class CartService {
     private final Map<String, Cart> carts = new ConcurrentHashMap<>();
     private final ProductRepository products;
     private final Clock clock;
+    private final BusinessMetrics metrics;
 
-    public CartService(ProductRepository products, Clock clock) {
+    public CartService(ProductRepository products, Clock clock, BusinessMetrics metrics) {
         this.products = products;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Transactional(readOnly = true)
     public CartResponse addItem(String cartId, long productId, int quantity) {
-        if (!products.existsById(productId)) {
-            throw new NotFoundException("Produto %d não encontrado".formatted(productId));
-        }
+        Product product = products.findById(productId)
+                .orElseThrow(() -> new NotFoundException("Produto %d não encontrado".formatted(productId)));
         Instant now = clock.instant();
         Cart cart = carts.computeIfAbsent(cartId, id -> new Cart(now));
         try {
@@ -51,6 +53,7 @@ public class CartService {
         } catch (IllegalStateException e) {
             throw new BusinessRuleException(e.getMessage());
         }
+        metrics.cartItemAdded(product.getCategory().name(), quantity);
         return view(cartId, cart.snapshot());
     }
 

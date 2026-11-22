@@ -1,0 +1,136 @@
+# Recording rules da EZBikes (gerado em janelas fixas; ver docs/slo.md).
+#
+# Pré-calculam os SLIs para que dashboards e alertas consultem séries prontas em vez de
+# recalcular rate() sobre dados brutos a cada atualização (Parte 17 da aula de Prometheus).
+#
+# Convenção de nome: nível:métrica:operação  (ex.: ezbikes:checkout_error_ratio:rate1h)
+#
+# SLI 1 - Disponibilidade do checkout: proporção de POST /api/orders SEM status 5xx.
+#         4xx (dados inválidos, estoque insuficiente) são erros do cliente e não contam.
+#         SLO: 99,9% em 30 dias  -> error budget de 0,1%.
+# SLI 2 - Latência do catálogo: proporção de GET /api/products* respondidos em até 300 ms.
+#         SLO: 99% em 30 dias    -> error budget de 1%.
+groups:
+  - name: ezbikes-sli-checkout-availability
+    interval: 30s
+    rules:
+      - record: ezbikes:checkout_requests:rate5m
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders"}[5m]))
+      - record: ezbikes:checkout_errors:rate5m
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status=~"5.."}[5m])) or vector(0)
+      - record: ezbikes:checkout_error_ratio:rate5m
+        expr: ezbikes:checkout_errors:rate5m / ezbikes:checkout_requests:rate5m
+      - record: ezbikes:checkout_requests:rate30m
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders"}[30m]))
+      - record: ezbikes:checkout_errors:rate30m
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status=~"5.."}[30m])) or vector(0)
+      - record: ezbikes:checkout_error_ratio:rate30m
+        expr: ezbikes:checkout_errors:rate30m / ezbikes:checkout_requests:rate30m
+      - record: ezbikes:checkout_requests:rate1h
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders"}[1h]))
+      - record: ezbikes:checkout_errors:rate1h
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status=~"5.."}[1h])) or vector(0)
+      - record: ezbikes:checkout_error_ratio:rate1h
+        expr: ezbikes:checkout_errors:rate1h / ezbikes:checkout_requests:rate1h
+      - record: ezbikes:checkout_requests:rate6h
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders"}[6h]))
+      - record: ezbikes:checkout_errors:rate6h
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status=~"5.."}[6h])) or vector(0)
+      - record: ezbikes:checkout_error_ratio:rate6h
+        expr: ezbikes:checkout_errors:rate6h / ezbikes:checkout_requests:rate6h
+      - record: ezbikes:checkout_requests:rate1d
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders"}[1d]))
+      - record: ezbikes:checkout_errors:rate1d
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status=~"5.."}[1d])) or vector(0)
+      - record: ezbikes:checkout_error_ratio:rate1d
+        expr: ezbikes:checkout_errors:rate1d / ezbikes:checkout_requests:rate1d
+      - record: ezbikes:checkout_requests:rate30d
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders"}[30d]))
+      - record: ezbikes:checkout_errors:rate30d
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status=~"5.."}[30d])) or vector(0)
+      - record: ezbikes:checkout_error_ratio:rate30d
+        expr: ezbikes:checkout_errors:rate30d / ezbikes:checkout_requests:rate30d
+
+  - name: ezbikes-sli-catalog-latency
+    interval: 30s
+    rules:
+      - record: ezbikes:catalog_requests:rate5m
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri=~"/api/products.*"}[5m]))
+      - record: ezbikes:catalog_fast_requests:rate5m
+        expr: sum(rate(http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri=~"/api/products.*",le="0.3"}[5m]))
+      - record: ezbikes:catalog_latency_good_ratio:rate5m
+        expr: ezbikes:catalog_fast_requests:rate5m / ezbikes:catalog_requests:rate5m
+      - record: ezbikes:catalog_requests:rate30m
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri=~"/api/products.*"}[30m]))
+      - record: ezbikes:catalog_fast_requests:rate30m
+        expr: sum(rate(http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri=~"/api/products.*",le="0.3"}[30m]))
+      - record: ezbikes:catalog_latency_good_ratio:rate30m
+        expr: ezbikes:catalog_fast_requests:rate30m / ezbikes:catalog_requests:rate30m
+      - record: ezbikes:catalog_requests:rate1h
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri=~"/api/products.*"}[1h]))
+      - record: ezbikes:catalog_fast_requests:rate1h
+        expr: sum(rate(http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri=~"/api/products.*",le="0.3"}[1h]))
+      - record: ezbikes:catalog_latency_good_ratio:rate1h
+        expr: ezbikes:catalog_fast_requests:rate1h / ezbikes:catalog_requests:rate1h
+      - record: ezbikes:catalog_requests:rate6h
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri=~"/api/products.*"}[6h]))
+      - record: ezbikes:catalog_fast_requests:rate6h
+        expr: sum(rate(http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri=~"/api/products.*",le="0.3"}[6h]))
+      - record: ezbikes:catalog_latency_good_ratio:rate6h
+        expr: ezbikes:catalog_fast_requests:rate6h / ezbikes:catalog_requests:rate6h
+      - record: ezbikes:catalog_requests:rate1d
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri=~"/api/products.*"}[1d]))
+      - record: ezbikes:catalog_fast_requests:rate1d
+        expr: sum(rate(http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri=~"/api/products.*",le="0.3"}[1d]))
+      - record: ezbikes:catalog_latency_good_ratio:rate1d
+        expr: ezbikes:catalog_fast_requests:rate1d / ezbikes:catalog_requests:rate1d
+      - record: ezbikes:catalog_requests:rate30d
+        expr: sum(rate(http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri=~"/api/products.*"}[30d]))
+      - record: ezbikes:catalog_fast_requests:rate30d
+        expr: sum(rate(http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri=~"/api/products.*",le="0.3"}[30d]))
+      - record: ezbikes:catalog_latency_good_ratio:rate30d
+        expr: ezbikes:catalog_fast_requests:rate30d / ezbikes:catalog_requests:rate30d
+
+  # Burn rate = taxa de erro observada / taxa de erro permitida pelo SLO.
+  # 1x consome o budget exatamente em 30 dias; 14,4x consome 2% do budget em 1 hora.
+  - name: ezbikes-slo-burn-rate
+    interval: 30s
+    rules:
+      - record: ezbikes:checkout_burn_rate:rate5m
+        expr: ezbikes:checkout_error_ratio:rate5m / 0.001
+      - record: ezbikes:catalog_latency_burn_rate:rate5m
+        expr: (1 - ezbikes:catalog_latency_good_ratio:rate5m) / 0.01
+      - record: ezbikes:checkout_burn_rate:rate30m
+        expr: ezbikes:checkout_error_ratio:rate30m / 0.001
+      - record: ezbikes:catalog_latency_burn_rate:rate30m
+        expr: (1 - ezbikes:catalog_latency_good_ratio:rate30m) / 0.01
+      - record: ezbikes:checkout_burn_rate:rate1h
+        expr: ezbikes:checkout_error_ratio:rate1h / 0.001
+      - record: ezbikes:catalog_latency_burn_rate:rate1h
+        expr: (1 - ezbikes:catalog_latency_good_ratio:rate1h) / 0.01
+      - record: ezbikes:checkout_burn_rate:rate6h
+        expr: ezbikes:checkout_error_ratio:rate6h / 0.001
+      - record: ezbikes:catalog_latency_burn_rate:rate6h
+        expr: (1 - ezbikes:catalog_latency_good_ratio:rate6h) / 0.01
+      - record: ezbikes:checkout_burn_rate:rate1d
+        expr: ezbikes:checkout_error_ratio:rate1d / 0.001
+      - record: ezbikes:catalog_latency_burn_rate:rate1d
+        expr: (1 - ezbikes:catalog_latency_good_ratio:rate1d) / 0.01
+
+  # Apoio às quatro Golden Signals (actuator fica de fora: é tráfego de infraestrutura).
+  - name: ezbikes-golden-signals
+    interval: 30s
+    rules:
+      - record: ezbikes:http_requests:rate1m
+        expr: sum by (uri, method) (rate(http_server_requests_seconds_count{job="ezbikes-api",uri!~"/actuator.*"}[1m]))
+      - record: ezbikes:http_server_errors:ratio_rate5m
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{job="ezbikes-api",uri!~"/actuator.*",status=~"5.."}[5m])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{job="ezbikes-api",uri!~"/actuator.*"}[5m]))
+      - record: ezbikes:http_latency_seconds:p50_5m
+        expr: histogram_quantile(0.5, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job="ezbikes-api",uri!~"/actuator.*"}[5m])))
+      - record: ezbikes:http_latency_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job="ezbikes-api",uri!~"/actuator.*"}[5m])))
+      - record: ezbikes:http_latency_seconds:p99_5m
+        expr: histogram_quantile(0.99, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job="ezbikes-api",uri!~"/actuator.*"}[5m])))

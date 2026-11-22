@@ -1,0 +1,21 @@
+# Prometheus da EZBikes: modelo pull (o Prometheus busca as métricas em cada alvo).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+  external_labels:
+    environment: demo
+
+rule_files:
+  - /etc/prometheus/rules/recording.yml
+
+scrape_configs:
+  # API: Actuator na porta de gestão 8081, acessível só pela rede interna do compose.
+  - job_name: ezbikes-api
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["api:8081"]
+
+  # O próprio Prometheus (saúde do sistema de monitoramento).
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

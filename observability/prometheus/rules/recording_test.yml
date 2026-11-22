@@ -1,0 +1,72 @@
+# Testes das recording rules:
+#   docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool \
+#     prom/prometheus:v3.1.0 test rules /rules/recording_test.yml
+rule_files:
+  - recording.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Por minuto: 100 pedidos pagos (201), 5 recusados por estoque (409) e 1 falha do gateway (502).
+  - name: 4xx não consomem o budget; 5xx sim
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="201"}'
+        values: '0+100x30'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="409"}'
+        values: '0+5x30'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="502"}'
+        values: '0+1x30'
+    promql_expr_test:
+      # 1 erro em 106 requisições
+      - expr: ezbikes:checkout_error_ratio:rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'ezbikes:checkout_error_ratio:rate5m'
+            value: 0.009433962264150943
+      # 0,943% de erro / 0,1% permitido = 9,43x
+      - expr: ezbikes:checkout_burn_rate:rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'ezbikes:checkout_burn_rate:rate5m'
+            value: 9.433962264150943
+
+  - name: sem nenhuma série 5xx a taxa de erro é zero (não vazia)
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="201"}'
+        values: '0+60x30'
+    promql_expr_test:
+      - expr: ezbikes:checkout_error_ratio:rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'ezbikes:checkout_error_ratio:rate5m'
+            value: 0
+
+  # Catálogo: 200 req/min, 198 abaixo de 300 ms -> 99% (exatamente no SLO, burn rate 1x).
+  - name: SLI de latência do catálogo usa o bucket de 300 ms
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri="/api/products",status="200"}'
+        values: '0+150x30'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="GET",uri="/api/products/{id}",status="200"}'
+        values: '0+50x30'
+      - series: 'http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri="/api/products",status="200",le="0.3"}'
+        values: '0+149x30'
+      - series: 'http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri="/api/products/{id}",status="200",le="0.3"}'
+        values: '0+49x30'
+      # Bucket de outro limite: não pode entrar no cálculo
+      - series: 'http_server_requests_seconds_bucket{job="ezbikes-api",method="GET",uri="/api/products",status="200",le="0.1"}'
+        values: '0+100x30'
+    promql_expr_test:
+      # round() evita falso negativo por arredondamento de ponto flutuante (0,98999...)
+      - expr: round(ezbikes:catalog_latency_good_ratio:rate5m, 0.0001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0.99
+      - expr: round(ezbikes:catalog_latency_burn_rate:rate5m, 0.0001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 1

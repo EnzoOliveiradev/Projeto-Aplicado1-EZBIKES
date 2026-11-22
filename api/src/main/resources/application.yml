@@ -23,6 +23,10 @@ spring:
 server:
   port: 8080
   shutdown: graceful
+  tomcat:
+    # Publica as métricas de threads do Tomcat (saturação: tomcat_threads_busy_threads)
+    mbeanregistry:
+      enabled: true
 
 ezbikes:
   environment: ${EZBIKES_ENVIRONMENT:local}
@@ -35,10 +39,15 @@ ezbikes:
     max-latency-ms: 120
 
 management:
+  # Actuator em porta separada: /actuator/prometheus expõe métricas de negócio (receita,
+  # volume de pedidos) e não deve ficar na mesma porta pública da loja. No compose, a 8081
+  # só é publicada em 127.0.0.1; o Prometheus a acessa pela rede interna do Docker.
+  server:
+    port: ${MANAGEMENT_PORT:8081}
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
@@ -47,6 +56,21 @@ management:
   info:
     env:
       enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # Histograma no lado do servidor: permite p50/p95/p99 com histogram_quantile e
+      # agregação entre réplicas (o que percentis calculados no cliente não permitem).
+      percentiles-histogram:
+        http.server.requests: true
+      minimum-expected-value:
+        http.server.requests: 5ms
+      maximum-expected-value:
+        http.server.requests: 5s
+      # Buckets exatos nos limites dos SLOs (300 ms é o alvo de latência do catálogo).
+      slo:
+        http.server.requests: 100ms,300ms,500ms,1s
 
 info:
   app:

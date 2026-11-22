@@ -5,9 +5,12 @@ import br.com.ezbikes.catalog.Product;
 import br.com.ezbikes.catalog.ProductRepository;
 import br.com.ezbikes.common.BusinessRuleException;
 import br.com.ezbikes.common.NotFoundException;
+import br.com.ezbikes.observability.BusinessMetrics;
+import br.com.ezbikes.observability.BusinessMetrics.CheckoutOutcome;
 import br.com.ezbikes.observability.PiiMasker;
 import br.com.ezbikes.payment.PaymentFailedException;
 import br.com.ezbikes.payment.PaymentGateway;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -51,18 +54,41 @@ public class OrderService {
     private final CartService carts;
     private final TransactionTemplate tx;
     private final Clock clock;
+    private final BusinessMetrics metrics;
 
     public OrderService(ProductRepository products, OrderRepository orders, PaymentGateway payments,
-                        CartService carts, TransactionTemplate tx, Clock clock) {
+                        CartService carts, TransactionTemplate tx, Clock clock, BusinessMetrics metrics) {
         this.products = products;
         this.orders = orders;
         this.payments = payments;
         this.carts = carts;
         this.tx = tx;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     public OrderResponse placeOrder(PlaceOrderRequest request) {
+        Timer.Sample sample = metrics.startCheckout();
+        CheckoutOutcome outcome = CheckoutOutcome.ERROR;
+        try {
+            OrderResponse paid = doPlaceOrder(request);
+            outcome = CheckoutOutcome.PAID;
+            return paid;
+        } catch (OutOfStockException e) {
+            outcome = CheckoutOutcome.OUT_OF_STOCK;
+            throw e;
+        } catch (PaymentFailedException e) {
+            outcome = CheckoutOutcome.PAYMENT_FAILED;
+            throw e;
+        } catch (BusinessRuleException | NotFoundException e) {
+            outcome = CheckoutOutcome.REJECTED;
+            throw e;
+        } finally {
+            metrics.checkoutFinished(sample, outcome);
+        }
+    }
+
+    private OrderResponse doPlaceOrder(PlaceOrderRequest request) {
         Map<Long, Integer> quantities = resolveItems(request);
 
         Order reserved = tx.execute(status -> reserve(request, quantities));
@@ -75,7 +101,9 @@ public class OrderService {
                     kv("customer_email", PiiMasker.maskEmail(reserved.getCustomerEmail())));
 
             try {
-                payments.charge(reserved.getId(), reserved.getTotal());
+                metrics.recordGatewayCall(
+                        () -> payments.charge(reserved.getId(), reserved.getTotal()),
+                        e -> e instanceof PaymentFailedException pf ? pf.getReason() : "unexpected");
             } catch (PaymentFailedException e) {
                 tx.executeWithoutResult(status -> failAndReleaseStock(reserved.getId()));
                 log.error("Falha no pagamento; pedido cancelado e estoque devolvido",
@@ -86,6 +114,7 @@ public class OrderService {
             }
 
             OrderResponse paid = tx.execute(status -> markPaid(reserved.getId()));
+            metrics.orderPaid(paid.total());
             log.info("Pagamento aprovado",
                     kv("event.action", "order.paid"),
                     kv("order_total", paid.total()));

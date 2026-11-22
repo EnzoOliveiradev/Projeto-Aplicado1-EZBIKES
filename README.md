@@ -11,7 +11,7 @@
 | Esqueleto Spring Boot, Docker Compose, PostgreSQL, Flyway e catálogo inicial | ✅ |
 | Carrinho, pedidos, estoque transacional e tratamento de erros | ✅ |
 | Logs JSON + ELK (Elasticsearch, Logstash, Kibana) | ✅ |
-| Métricas (Actuator, Micrometer, Prometheus) e recording rules | ⏳ |
+| Métricas (Actuator, Micrometer, Prometheus) e recording rules | ✅ |
 | Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ⏳ |
 | Injeção de falhas e testes de carga com k6 | ⏳ |
 | Vitrine HTML/JS e CI no GitHub Actions | ⏳ |
@@ -40,6 +40,8 @@ flowchart LR
     API -- "logs JSON (TCP 50000)" --> LS[Logstash]
     LS --> ES[(Elasticsearch)]
     ES --> KB[Kibana]
+    PR[Prometheus] -- "scrape :8081/actuator/prometheus" --> API
+    GF[Grafana] --> PR
 ```
 
 ## Como executar
@@ -56,7 +58,10 @@ docker compose up -d --build
 |---|---|
 | Catálogo (API) | http://localhost:8080/api/products |
 | Filtro por categoria/marca | http://localhost:8080/api/products?category=MTB&brand=Caloi |
-| Health check | http://localhost:8080/actuator/health |
+| Health check | http://127.0.0.1:8081/actuator/health |
+| Métricas (formato Prometheus) | http://127.0.0.1:8081/actuator/prometheus |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 (usuário `admin`, senha `ezbikes`, configuráveis no `.env`) |
 | Kibana (logs) | http://localhost:5601 → Discover → data view **EZBikes - logs** |
 | Elasticsearch | http://localhost:9200 |
 
@@ -142,6 +147,65 @@ event.action: "stock.low"
 
 **Resiliência:** a API não depende do Logstash para subir. Se o pipeline de logs cair, a loja continua atendendo e o appender reconecta sozinho.
 
+## Métricas (Prometheus)
+
+A API expõe métricas pelo Actuator + Micrometer em `/actuator/prometheus`. O Prometheus coleta a cada 15 s (modelo *pull*) e guarda 30 dias, a mesma janela dos SLOs.
+
+**Segurança:** o Actuator roda numa **porta de gestão separada (8081)**, publicada só em `127.0.0.1`. A porta pública da loja (8080) responde 404 para `/actuator/prometheus`, porque as métricas de negócio (receita, volume de pedidos) não devem ficar expostas a clientes. O Prometheus acessa a 8081 pela rede interna do Docker.
+
+### Métricas de negócio
+
+| Métrica (Prometheus) | Tipo | Labels | Uso |
+|---|---|---|---|
+| `ezbikes_orders_total` | Counter | `status`: paid, payment_failed, out_of_stock, rejected, error | volume e resultado dos pedidos |
+| `ezbikes_checkout_duration_seconds` | Timer (histograma) | `outcome` | latência do checkout de ponta a ponta |
+| `ezbikes_order_value_reais` | DistributionSummary | — | receita (`_sum`) e ticket médio (`_sum / _count`) |
+| `ezbikes_cart_items_added_total` | Counter | `category` | interesse por categoria, conversão |
+| `ezbikes_payment_gateway_duration_seconds` | Timer (histograma) | `outcome`: success, failure | latência da dependência externa |
+| `ezbikes_payment_gateway_failures_total` | Counter | `reason` | falhas do gateway por motivo |
+| `ezbikes_product_stock` | Gauge | `sku`, `category` | estoque por produto (atualizado a cada 15 s, sem consultar o banco no scrape) |
+
+Além delas, o Spring Boot publica as métricas técnicas usadas nas Golden Signals: `http_server_requests_seconds` (histograma com buckets exatos em 100 ms, 300 ms, 500 ms e 1 s), `process_cpu_usage`, `jvm_memory_used_bytes`, `hikaricp_connections_active` e `tomcat_threads_busy_threads`. Todas as séries levam o label `application="ezbikes-api"`.
+
+**Cardinalidade:** os labels têm conjuntos pequenos e fechados. Identificadores como `order_id`, cliente ou e-mail **nunca** viram label, porque cada valor distinto criaria uma série temporal nova. Eles ficam nos logs, onde a busca por valor único é barata. A URI das requisições usa o *template* (`/api/products/{id}`), não o caminho real.
+
+**Correspondência com a aula:** o material usa nomes genéricos; no Spring Boot eles são:
+
+| Aula | EZBikes (Micrometer) |
+|---|---|
+| `http_requests_total` | `http_server_requests_seconds_count` |
+| `http_request_duration_bucket` | `http_server_requests_seconds_bucket` |
+| label `status` | `status` (também há `outcome`: SUCCESS, CLIENT_ERROR, SERVER_ERROR) |
+
+### Recording rules e SLIs
+
+As regras em [`observability/prometheus/rules/recording.yml`](observability/prometheus/rules/recording.yml) pré-calculam os SLIs nas janelas de 5m, 30m, 1h, 6h, 1d e 30d:
+
+| SLI | Série gravada | Definição |
+|---|---|---|
+| Disponibilidade do checkout | `ezbikes:checkout_error_ratio:rate<janela>` | `POST /api/orders` com 5xx ÷ total (4xx não contam) |
+| Latência do catálogo | `ezbikes:catalog_latency_good_ratio:rate<janela>` | `GET /api/products*` em até 300 ms ÷ total |
+| Burn rate | `ezbikes:checkout_burn_rate:rate<janela>`, `ezbikes:catalog_latency_burn_rate:rate<janela>` | taxa de erro ÷ taxa permitida pelo SLO |
+| Golden Signals | `ezbikes:http_requests:rate1m`, `ezbikes:http_server_errors:ratio_rate5m`, `ezbikes:http_latency_seconds:p50_5m`/`p95_5m`/`p99_5m` | por URI |
+
+As regras têm **testes unitários** ([`recording_test.yml`](observability/prometheus/rules/recording_test.yml)) que provam, com séries sintéticas, que 409 não entra na taxa de erro, que a taxa é 0 (e não vazia) quando ainda não houve nenhum 5xx e que o SLI de latência usa só o bucket de 300 ms:
+
+```bash
+docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool   prom/prometheus:v3.1.0 test rules /rules/recording_test.yml
+```
+
+PromQL de exemplo (Prometheus → Graph):
+
+```
+ezbikes:checkout_error_ratio:rate5m                          # taxa de erro do checkout
+ezbikes:checkout_burn_rate:rate1h                            # burn rate da última hora
+ezbikes:http_latency_seconds:p99_5m                          # p99 por rota
+sum by (status) (rate(ezbikes_orders_total[5m]))             # pedidos por resultado
+increase(ezbikes_order_value_reais_sum[1h])                  # receita da última hora
+```
+
+O Grafana já sobe com o datasource do Prometheus provisionado (`uid: prometheus`) e a pasta **EZBikes**, onde ficarão os dashboards versionados.
+
 ## Testes
 
 ```bash
@@ -149,7 +213,7 @@ cd api
 ./mvnw verify
 ```
 
-Os testes de integração usam **Testcontainers** com PostgreSQL 16 real. Eles verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
+Os testes de integração usam **Testcontainers** com PostgreSQL 16 real. Eles verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro), as métricas de negócio (cada resultado do checkout incrementa a série certa e os nomes expostos são os usados pelas recording rules) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
 
 Sem Java instalado, rode os testes dentro de um container Maven:
 
@@ -167,5 +231,7 @@ docker run --rm -v "$PWD":/w -v ezbikes-m2:/root/.m2 \
 api/                        API Spring Boot (código, migrações Flyway, Dockerfile)
 observability/logstash/     Pipeline do Logstash
 observability/elk/setup.sh  Retenção (ILM), index template e data view do Kibana
+observability/prometheus/   Configuração de scrape e recording rules (com testes)
+observability/grafana/      Provisionamento do Grafana e dashboards (JSON)
 docker-compose.yml          Orquestração local
 ```
