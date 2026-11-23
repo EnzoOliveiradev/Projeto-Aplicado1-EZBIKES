@@ -16,6 +16,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "observability/prometheus/rules/alerts.yml"
 OUT = ROOT / "observability/grafana/provisioning/alerting/ezbikes-alerts.yml"
 SLO_DASH, BURN_PANEL = "ezbikes-slo", "8"  # painel "Burn rate do checkout" (build_dashboards.py)
+MIN_REQUESTS = 10  # mesma guarda de volume das regras em alerts.yml
+
+
+def zero_if_nan(expr):
+    """Sem tráfego a razão vira NaN (0/0). Para o Grafana decidir igual ao Prometheus,
+    NaN (ou ausência de série) vira 0: "sem tráfego" nunca é "disparando"."""
+    return f"({expr} >= 0) or vector(0)"
 
 
 def parse_alerts(text):
@@ -36,7 +43,7 @@ def parse_alerts(text):
 
 def query(ref, expr):
     return {"refId": ref, "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus",
-            "model": {"refId": ref, "expr": expr, "instant": True, "range": False,
+            "model": {"refId": ref, "expr": zero_if_nan(expr), "instant": True, "range": False,
                       "intervalMs": 1000, "maxDataPoints": 43200}}
 
 
@@ -54,10 +61,12 @@ def rule(uid, title, src, data, for_, panel=None):
             "labels": src["labels"], "annotations": annotations}
 
 
-def mwmbr(uid, title, src, long_q, short_q, threshold, for_, panel=None):
-    """Janela longa E janela curta acima do limiar (expressão math: 1 = disparando)."""
-    data = [query("A", long_q), query("B", short_q),
-            expression("C", {"type": "math", "expression": f"$A > {threshold} && $B > {threshold}"})]
+def mwmbr(uid, title, src, long_q, short_q, volume_q, threshold, for_, panel=None):
+    """Janela longa E janela curta acima do limiar E volume mínimo na janela curta
+    (expressão math: 1 = disparando)."""
+    data = [query("A", long_q), query("B", short_q), query("V", volume_q),
+            expression("C", {"type": "math",
+                             "expression": f"$A > {threshold} && $B > {threshold} && $V >= {MIN_REQUESTS}"})]
     return rule(uid, title, src, data, for_, panel)
 
 
@@ -80,13 +89,16 @@ def main():
         "groups": [{"orgId": 1, "name": "ezbikes-slo", "folder": "EZBikes", "interval": "1m", "rules": [
             mwmbr("ezbikes-checkout-burn-critical", "Checkout · burn rate crítico (14,4x em 1h e 5m)",
                   a["CheckoutErrorBudgetBurnCritical"], "ezbikes:checkout_burn_rate:rate1h",
-                  "ezbikes:checkout_burn_rate:rate5m", 14.4, "1m", BURN_PANEL),
+                  "ezbikes:checkout_burn_rate:rate5m", "ezbikes:checkout_requests:rate5m * 300",
+                  14.4, "1m", BURN_PANEL),
             mwmbr("ezbikes-checkout-burn-high", "Checkout · burn rate alto (6x em 6h e 30m)",
                   a["CheckoutErrorBudgetBurnHigh"], "ezbikes:checkout_burn_rate:rate6h",
-                  "ezbikes:checkout_burn_rate:rate30m", 6, "5m", BURN_PANEL),
+                  "ezbikes:checkout_burn_rate:rate30m", "ezbikes:checkout_requests:rate30m * 1800",
+                  6, "5m", BURN_PANEL),
             mwmbr("ezbikes-catalog-burn-critical", "Catálogo · burn rate de latência crítico (14,4x em 1h e 5m)",
                   a["CatalogLatencyBudgetBurnCritical"], "ezbikes:catalog_latency_burn_rate:rate1h",
-                  "ezbikes:catalog_latency_burn_rate:rate5m", 14.4, "1m"),
+                  "ezbikes:catalog_latency_burn_rate:rate5m", "ezbikes:catalog_requests:rate5m * 300",
+                  14.4, "1m"),
             single("ezbikes-catalog-p99", "Catálogo · p99 acima de 500 ms", a["CatalogLatencyP99High"],
                    'max(ezbikes:http_latency_seconds:p99_5m{uri=~"/api/products.*"})', 0.5, "5m"),
         ]}],

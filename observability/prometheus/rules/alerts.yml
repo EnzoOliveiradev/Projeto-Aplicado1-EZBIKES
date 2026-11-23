@@ -12,11 +12,18 @@
 #   Severidade  Burn rate  Janela longa  Janela curta  Budget consumido na janela longa
 #   crítico     14,4x      1h            5m            2%
 #   alto        6x         6h            30m           5%
+#
+# Volume mínimo: os alertas de burn rate exigem pelo menos 10 requisições na janela curta.
+# Com pouco tráfego, uma única falha vira uma proporção enorme (1 erro em 2 pedidos = 50%,
+# burn rate de 500x) sem representar perda real para os clientes. Isso foi observado no
+# experimento de 23/11 (docs/evidencias/experimento-caos.md) e está coberto em alerts_test.yml.
 groups:
   - name: ezbikes-slo-alerts
     rules:
       - alert: CheckoutErrorBudgetBurnCritical
-        expr: ezbikes:checkout_burn_rate:rate1h > 14.4 and ezbikes:checkout_burn_rate:rate5m > 14.4
+        expr: >-
+          ezbikes:checkout_burn_rate:rate1h > 14.4 and ezbikes:checkout_burn_rate:rate5m > 14.4
+          and ezbikes:checkout_requests:rate5m * 300 >= 10
         for: 1m
         labels:
           severity: critical
@@ -28,7 +35,9 @@ groups:
           runbook: Ver falhas no Kibana (event.action:"order.payment_failed") e o painel do gateway. Política - congelar deploys e considerar rollback.
 
       - alert: CheckoutErrorBudgetBurnHigh
-        expr: ezbikes:checkout_burn_rate:rate6h > 6 and ezbikes:checkout_burn_rate:rate30m > 6
+        expr: >-
+          ezbikes:checkout_burn_rate:rate6h > 6 and ezbikes:checkout_burn_rate:rate30m > 6
+          and ezbikes:checkout_requests:rate30m * 1800 >= 10
         for: 5m
         labels:
           severity: warning
@@ -40,7 +49,9 @@ groups:
           runbook: Abrir chamado para o time no horário comercial e investigar a tendência no dashboard de SLO.
 
       - alert: CatalogLatencyBudgetBurnCritical
-        expr: ezbikes:catalog_latency_burn_rate:rate1h > 14.4 and ezbikes:catalog_latency_burn_rate:rate5m > 14.4
+        expr: >-
+          ezbikes:catalog_latency_burn_rate:rate1h > 14.4 and ezbikes:catalog_latency_burn_rate:rate5m > 14.4
+          and ezbikes:catalog_requests:rate5m * 300 >= 10
         for: 1m
         labels:
           severity: critical

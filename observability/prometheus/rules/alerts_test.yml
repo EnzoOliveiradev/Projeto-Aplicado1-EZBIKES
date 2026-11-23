@@ -74,3 +74,28 @@ tests:
               summary: Checkout consumindo o error budget 6x mais rápido que o permitido
               description: Burn rate acima de 6x nas últimas 6 horas e nos últimos 30 minutos (5% do budget em 6 horas).
               runbook: Abrir chamado para o time no horário comercial e investigar a tendência no dashboard de SLO.
+
+  # Pouco tráfego: 1 checkout pago no minuto 30 e 1 falha (502) no minuto 40.
+  # A proporção dispara (1 erro em 2 pedidos = 50%, burn rate de 500x nas duas janelas),
+  # mas há menos de 10 checkouts na janela de 5m: nenhuma página deve ser enviada.
+  - name: uma falha isolada com pouco tráfego não dispara alerta
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="201"}'
+        values: '0x30 1x30'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="502"}'
+        values: '0x40 1x20'
+    promql_expr_test:
+      # Sem a guarda de volume, o burn rate das duas janelas passaria muito de 14,4x
+      - expr: ezbikes:checkout_burn_rate:rate5m > 14.4 and ezbikes:checkout_burn_rate:rate1h > 14.4
+        eval_time: 43m
+        exp_samples:
+          - labels: 'ezbikes:checkout_burn_rate:rate5m'
+            value: 1000
+    alert_rule_test:
+      - eval_time: 43m
+        alertname: CheckoutErrorBudgetBurnCritical
+        exp_alerts: []
+      - eval_time: 43m
+        alertname: CheckoutErrorBudgetBurnHigh
+        exp_alerts: []

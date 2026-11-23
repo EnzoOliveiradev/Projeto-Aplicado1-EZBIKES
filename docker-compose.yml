@@ -84,6 +84,10 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - TELEMETRY_OPTIN=false
+      - TELEMETRY_BANNER=false
+      - TELEMETRY_ALLOWCHANGINGOPTINSTATUS=false
+      # Ambiente local de demonstração sem autenticação: oculta o aviso de cluster sem segurança.
+      - XPACK_SECURITY_SHOWINSECURECLUSTERWARNING=false
     ports:
       - "5601:5601"
     mem_limit: 1000m
@@ -151,6 +155,10 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Acesso anônimo somente leitura: desligado por padrão. Útil para capturar prints
+      # ou projetar os dashboards na apresentação (GRAFANA_ANONYMOUS_ENABLED=true).
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-false}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro

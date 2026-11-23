@@ -49,15 +49,19 @@ Os alertas seguem o padrão **multi-window, multi-burn-rate** (Google SRE Workbo
 
 | Alerta | Condição | `for` | Severidade | Budget consumido |
 |---|---|---|---|---|
-| `CheckoutErrorBudgetBurnCritical` | burn > 14,4x em **1h e 5m** | 1m | crítico (acionar agora) | 2% em 1 hora |
-| `CheckoutErrorBudgetBurnHigh` | burn > 6x em **6h e 30m** | 5m | alto (chamado) | 5% em 6 horas |
-| `CatalogLatencyBudgetBurnCritical` | burn de latência > 14,4x em 1h e 5m | 1m | crítico | 2% em 1 hora |
+| `CheckoutErrorBudgetBurnCritical` | burn > 14,4x em **1h e 5m**, com ≥ 10 checkouts em 5m | 1m | crítico (acionar agora) | 2% em 1 hora |
+| `CheckoutErrorBudgetBurnHigh` | burn > 6x em **6h e 30m**, com ≥ 10 checkouts em 30m | 5m | alto (chamado) | 5% em 6 horas |
+| `CatalogLatencyBudgetBurnCritical` | burn de latência > 14,4x em 1h e 5m, com ≥ 10 requisições em 5m | 1m | crítico | 2% em 1 hora |
 | `CatalogLatencyP99High` | p99 do catálogo > 500 ms | 5m | alto | — |
 
 **Por que duas janelas:**
 - só a janela longa (1h) demoraria a disparar e continuaria disparando por até 1 hora depois de o problema ser resolvido;
 - só a janela curta (5m) dispararia com qualquer pico de segundos (falso positivo);
 - exigir as duas dá detecção relevante **e** reset rápido. O teste `alerts_test.yml` prova os dois lados: o alerta dispara durante o incidente e já está inativo 10 minutos depois do fim das falhas, embora a janela de 1h ainda esteja alta; uma taxa de 0,5% (5x) não dispara nada; 1% persistente (10x) dispara só o alerta de 6x.
+
+**Volume mínimo:** com pouco tráfego, uma única falha vira uma proporção enorme (1 erro em 2 pedidos = 50%, burn rate de 500x). Isso aconteceu de verdade durante os testes: um único checkout com falha disparou o alerta de 6x (ver [evidências](evidencias/experimento-caos.md#achado-falso-positivo-com-pouco-tráfego)). Por isso os alertas de burn rate exigem pelo menos 10 requisições na janela curta. O custo: num período com pouquíssimo tráfego, nem uma falha total dispara o alerta. A cobertura desse caso seria monitoramento sintético, que fica como evolução.
+
+**Sem tráfego:** a razão erros ÷ requisições vira NaN (0 ÷ 0). As consultas do Grafana convertem NaN em 0 (`(expr >= 0) or vector(0)`), para decidir igual ao Prometheus: ausência de tráfego nunca é "disparando".
 
 **Onde estão:**
 - Grafana Alerting (quem notifica): `observability/grafana/provisioning/alerting/ezbikes-alerts.yml`, gerado por `build_alerts.py` a partir de

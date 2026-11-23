@@ -53,7 +53,7 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "ezbikes:checkout_burn_rate:rate1h",
+                "expr": "(ezbikes:checkout_burn_rate:rate1h >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,
@@ -69,7 +69,23 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "B",
-                "expr": "ezbikes:checkout_burn_rate:rate5m",
+                "expr": "(ezbikes:checkout_burn_rate:rate5m >= 0) or vector(0)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "V",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "V",
+                "expr": "(ezbikes:checkout_requests:rate5m * 300 >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,
@@ -86,7 +102,7 @@
                   "uid": "__expr__"
                 },
                 "type": "math",
-                "expression": "$A > 14.4 && $B > 14.4"
+                "expression": "$A > 14.4 && $B > 14.4 && $V >= 10"
               }
             }
           ],
@@ -121,7 +137,7 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "ezbikes:checkout_burn_rate:rate6h",
+                "expr": "(ezbikes:checkout_burn_rate:rate6h >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,
@@ -137,7 +153,23 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "B",
-                "expr": "ezbikes:checkout_burn_rate:rate30m",
+                "expr": "(ezbikes:checkout_burn_rate:rate30m >= 0) or vector(0)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "V",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "V",
+                "expr": "(ezbikes:checkout_requests:rate30m * 1800 >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,
@@ -154,7 +186,7 @@
                   "uid": "__expr__"
                 },
                 "type": "math",
-                "expression": "$A > 6 && $B > 6"
+                "expression": "$A > 6 && $B > 6 && $V >= 10"
               }
             }
           ],
@@ -189,7 +221,7 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "ezbikes:catalog_latency_burn_rate:rate1h",
+                "expr": "(ezbikes:catalog_latency_burn_rate:rate1h >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,
@@ -205,7 +237,23 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "B",
-                "expr": "ezbikes:catalog_latency_burn_rate:rate5m",
+                "expr": "(ezbikes:catalog_latency_burn_rate:rate5m >= 0) or vector(0)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "V",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "V",
+                "expr": "(ezbikes:catalog_requests:rate5m * 300 >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,
@@ -222,7 +270,7 @@
                   "uid": "__expr__"
                 },
                 "type": "math",
-                "expression": "$A > 14.4 && $B > 14.4"
+                "expression": "$A > 14.4 && $B > 14.4 && $V >= 10"
               }
             }
           ],
@@ -255,7 +303,7 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "max(ezbikes:http_latency_seconds:p99_5m{uri=~\"/api/products.*\"})",
+                "expr": "(max(ezbikes:http_latency_seconds:p99_5m{uri=~\"/api/products.*\"}) >= 0) or vector(0)",
                 "instant": true,
                 "range": false,
                 "intervalMs": 1000,

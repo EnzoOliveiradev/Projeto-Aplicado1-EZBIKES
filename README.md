@@ -17,7 +17,8 @@
 | Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ✅ |
 | Injeção de falhas e testes de carga com k6 | ✅ |
 | Vitrine HTML/JS e CI no GitHub Actions | ✅ |
-| Evidências, SLOs documentados e reflexão crítica | ⏳ |
+| Evidências (prints e resultados) e SLOs documentados | ✅ |
+| Reflexão crítica, roteiro da demonstração e revisão final | ⏳ |
 
 ## Mapeamento: conteúdo da pós → implementação
 
@@ -269,14 +270,15 @@ A definição completa dos SLOs, da política de error budget e dos alertas est�
 
 | Alerta | Condição | Severidade |
 |---|---|---|
-| Checkout · burn rate crítico | burn > 14,4x em **1h e 5m**, por 1 min | crítico |
-| Checkout · burn rate alto | burn > 6x em **6h e 30m**, por 5 min | alto |
-| Catálogo · burn rate de latência crítico | burn de latência > 14,4x em 1h e 5m | crítico |
+| Checkout · burn rate crítico | burn > 14,4x em **1h e 5m**, por 1 min, com ≥ 10 checkouts em 5m | crítico |
+| Checkout · burn rate alto | burn > 6x em **6h e 30m**, por 5 min, com ≥ 10 checkouts em 30m | alto |
+| Catálogo · burn rate de latência crítico | burn de latência > 14,4x em 1h e 5m, com ≥ 10 requisições em 5m | crítico |
 | Catálogo · p99 acima de 500 ms | por 5 min | alto |
 
 - **Fonte única:** os alertas são escritos uma vez em [`alerts.yml`](observability/prometheus/rules/alerts.yml), testados com `promtool` ([`alerts_test.yml`](observability/prometheus/rules/alerts_test.yml)) e convertidos para o Grafana Alerting por [`build_alerts.py`](observability/grafana/build_alerts.py). O Prometheus também os avalia (http://localhost:9090/alerts), como segunda visão.
 - **Notificação:** o contact point `ezbikes-webhook` envia para o serviço `alert-receiver`, que registra cada notificação em JSON. Ele faz o papel de Slack ou e-mail na demonstração: `docker compose logs alert-receiver`.
 - **Anotações:** os alertas de checkout aparecem marcados no gráfico de burn rate do dashboard de SLO.
+- **Volume mínimo:** um único checkout com falha num período sem tráfego chegou a disparar o alerta de 6x durante os testes (1 erro em 2 pedidos = burn rate de 500x). Desde então os alertas exigem pelo menos 10 requisições na janela curta, e o caso está coberto em `alerts_test.yml`. Detalhes em [docs/slo.md](docs/slo.md).
 
 **Validação (22/11/2026, horários em UTC):** com o gateway falhando em 20% dos pagamentos e tráfego contínuo:
 
@@ -325,7 +327,13 @@ A jornada simulada (`lib/scenario.js`) navega pelo catálogo, abre um produto e,
 
 **Ponto de ruptura (~1.100 req/s nesta máquina):** o primeiro recurso a esgotar foi o **pool de conexões do banco** (10 de 10 em uso, 174 requisições esperando). Em seguida as 200 threads do Tomcat se esgotaram e o p99 do catálogo saltou de 5 ms para 355 ms, **com a CPU em 22% e nenhum erro 5xx**: a loja não caiu, ficou lenta. Detalhes e tabelas por minuto em [docs/evidencias/testes-de-carga.md](docs/evidencias/testes-de-carga.md).
 
-**Experimento de caos (5% de falha no pagamento):** o alerta crítico de burn rate disparou e notificou em ~5 minutos (burn de 51x na janela de 5m), e resolveu 4 minutos depois de a falha ser removida, embora a janela de 1h continuasse em 18x. Linha do tempo completa em [docs/evidencias/experimento-caos.md](docs/evidencias/experimento-caos.md).
+**Experimentos de caos** (linha do tempo completa em [docs/evidencias/experimento-caos.md](docs/evidencias/experimento-caos.md)):
+
+- **5% de falha no pagamento:** o alerta crítico disparou e notificou em ~5 minutos (burn de 51x na janela de 5m) e resolveu 4 minutos depois de a falha ser removida, embora a janela de 1h continuasse em 18x.
+- **400 ms de latência no catálogo:** burn de 100x em 5m, mas só 5,6x em 1h, diluído pelos ~200 mil acessos rápidos dos testes de carga. Nenhum alerta disparou, e é o comportamento correto: 10 minutos de lentidão numa hora de alto volume consomem pouco do budget mensal.
+- **600 ms de latência no catálogo:** os alertas de p99 (> 500 ms) e de burn rate crítico de latência dispararam assim que o tráfego dos testes de carga saiu da janela de 1h. Os painéis de saturação ficaram baixos, o que distingue lentidão externa de recurso esgotado.
+
+Prints de todos os dashboards em [docs/evidencias](docs/evidencias/README.md).
 
 ## Testes
 
