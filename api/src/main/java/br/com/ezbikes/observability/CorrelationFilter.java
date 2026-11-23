@@ -11,6 +11,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -54,16 +55,20 @@ public class CorrelationFilter extends OncePerRequestFilter {
         try {
             chain.doFilter(request, response);
         } finally {
-            if (!isInfrastructure(request)) {
-                logAccess(request, response.getStatus(), (System.nanoTime() - start) / 1_000_000);
+            int status = response.getStatus();
+            if (!isInfrastructure(request) && !isStaticAsset(request, status)) {
+                logAccess(request, status, (System.nanoTime() - start) / 1_000_000);
             }
             MDC.clear();
         }
     }
 
     private static void logAccess(HttpServletRequest request, int status, long durationMs) {
+        // Template da rota (ex.: /api/products/{id}): agrega no Kibana sem explodir em IDs.
+        Object route = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
         Object[] fields = {
                 kv("event.action", "http.access"),
+                kv("http.route", route == null ? "UNKNOWN" : route.toString()),
                 kv("http.status", status),
                 kv("http.duration_ms", durationMs)
         };
@@ -78,6 +83,12 @@ public class CorrelationFilter extends OncePerRequestFilter {
     /** Health checks e scraping do Prometheus geram ruído; não entram no log de acesso. */
     private static boolean isInfrastructure(HttpServletRequest request) {
         return request.getRequestURI().startsWith("/actuator");
+    }
+
+    /** Páginas, CSS e JS da vitrine servidos com sucesso também ficam fora (erros continuam). */
+    private static boolean isStaticAsset(HttpServletRequest request, int status) {
+        String uri = request.getRequestURI();
+        return status < 400 && !uri.startsWith("/api/") && !uri.startsWith("/admin/");
     }
 
     static String resolveTraceId(String received) {

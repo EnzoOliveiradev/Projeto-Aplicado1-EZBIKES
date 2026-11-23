@@ -115,6 +115,7 @@ services:
     command: ["kibana"]
     volumes:
       - ./observability/elk/setup.sh:/setup/setup.sh:ro
+      - ./observability/kibana:/kibana:ro
     depends_on:
       kibana:
         condition: service_healthy

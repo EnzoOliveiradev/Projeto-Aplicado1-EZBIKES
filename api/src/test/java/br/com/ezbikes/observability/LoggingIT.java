@@ -74,6 +74,7 @@ class LoggingIT extends IntegrationTest {
         assertThat(created.path("service").asText()).isEqualTo("ezbikes-api");
 
         JsonNode access = byAction(logs, "http.access");
+        assertThat(access.path("http.route").asText()).isEqualTo("/api/orders");
         assertThat(access.path("http.status").isInt()).isTrue();
         assertThat(access.path("http.status").asInt()).isEqualTo(201);
         assertThat(access.path("http.duration_ms").isNumber()).isTrue();

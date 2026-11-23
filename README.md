@@ -1,5 +1,7 @@
 # Projeto-Aplicado1-EZBIKES
 
+[![CI](https://github.com/EnzoOliveiradev/Projeto-Aplicado1-EZBIKES/actions/workflows/ci.yml/badge.svg)](https://github.com/EnzoOliveiradev/Projeto-Aplicado1-EZBIKES/actions/workflows/ci.yml)
+
 **EZBikes** é uma loja virtual de bicicletas construída como um sistema **observável**: além de vender, ela produz logs estruturados, métricas de negócio e de desempenho, SLOs com error budget e alertas de burn rate. O projeto foi desenvolvido para o Projeto Aplicado I da pós-graduação (disciplina *Observabilidade, SRE e Engenharia de Confiabilidade de Sistemas*).
 
 > 🚧 Em construção. Esta página será ampliada a cada etapa do cronograma até a entrega.
@@ -14,7 +16,7 @@
 | Métricas (Actuator, Micrometer, Prometheus) e recording rules | ✅ |
 | Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ✅ |
 | Injeção de falhas e testes de carga com k6 | ✅ |
-| Vitrine HTML/JS e CI no GitHub Actions | ⏳ |
+| Vitrine HTML/JS e CI no GitHub Actions | ✅ |
 | Evidências, SLOs documentados e reflexão crítica | ⏳ |
 
 ## Mapeamento: conteúdo da pós → implementação
@@ -57,16 +59,32 @@ docker compose up -d --build
 
 | Recurso | URL |
 |---|---|
+| **Loja (vitrine)** | http://localhost:8080 |
 | Catálogo (API) | http://localhost:8080/api/products |
 | Filtro por categoria/marca | http://localhost:8080/api/products?category=MTB&brand=Caloi |
 | Health check | http://127.0.0.1:8081/actuator/health |
 | Métricas (formato Prometheus) | http://127.0.0.1:8081/actuator/prometheus |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (usuário `admin`, senha `ezbikes`, configuráveis no `.env`) → Dashboards → EZBikes |
-| Kibana (logs) | http://localhost:5601 → Discover → data view **EZBikes - logs** |
+| Kibana (logs) | http://localhost:5601 → Dashboards → **EZBikes · Logs**, ou Discover → data view **EZBikes - logs** |
 | Elasticsearch | http://localhost:9200 |
 
 Para parar e apagar os dados: `docker compose down -v`.
+
+## Vitrine
+
+A loja tem uma vitrine simples em HTML, CSS e JavaScript puro, servida pela própria API em http://localhost:8080 (arquivos em [`api/src/main/resources/static`](api/src/main/resources/static)):
+
+- **Catálogo** com filtros por categoria e marca;
+- **Produto** com quantidade e "Adicionar ao carrinho";
+- **Carrinho** com remoção de itens e formulário de checkout (nome e e-mail);
+- **Pedido** com a confirmação, a situação e o número do pedido.
+
+Ela foi pensada para a demonstração de observabilidade:
+- quando o pagamento falha, a tela mostra o **código de atendimento**, que é o `X-Request-Id` devolvido pela API. No Kibana, `trace_id: "<código>"` mostra exatamente o que aconteceu naquela tentativa;
+- a página do pedido mostra o `order_id` e a busca pronta para o Kibana.
+
+Os dados da API entram na página só por `textContent` (nunca `innerHTML`), o que evita injeção de HTML. O `cartId` fica no `localStorage`; se o navegador bloquear o armazenamento, a loja continua funcionando na sessão. O visual acompanha o tema claro ou escuro do sistema.
 
 ## API
 
@@ -141,6 +159,7 @@ Todos os logs saem em **JSON** (`logstash-logback-encoder`), no console e, no pr
 | `service`, `environment` | fixos | `ezbikes-api`, `demo` |
 | `trace_id` | `X-Request-Id` recebido ou gerado (MDC) | `demo-order-0004` |
 | `http.method`, `http.path` | MDC | `POST`, `/api/orders` |
+| `http.route` | log de acesso (template da rota) | `/api/products/{id}` |
 | `http.status`, `http.duration_ms` | log de acesso (numéricos) | `502`, `87` |
 | `event.action` | eventos de negócio (nome do ECS) | `order.payment_failed` |
 | `order_id` | MDC durante o checkout | UUID do pedido |
@@ -150,6 +169,10 @@ Todos os logs saem em **JSON** (`logstash-logback-encoder`), no console e, no pr
 **Eventos de negócio:** `order.created`, `order.paid`, `order.payment_failed` (ERROR), `order.rejected_out_of_stock` (WARN), `stock.low` (WARN, estoque abaixo de 3), `error.unexpected` (ERROR) e `http.access` (um por requisição; WARN para 5xx).
 
 A API devolve o `trace_id` no cabeçalho `X-Request-Id`, para o cliente informar ao suporte. Requisições a `/actuator/**` (health check e scraping) ficam fora do log de acesso para não gerar ruído.
+
+**Dashboard e buscas salvas:** o `kibana-setup` importa [`saved-objects.ndjson`](observability/kibana/saved-objects.ndjson) (gerado por [`build_saved_objects.py`](observability/kibana/build_saved_objects.py)) com o dashboard **EZBikes · Logs** (logs por nível, eventos de pedidos ao longo do tempo, top 5 mensagens de erro, duração por rota e falhas de pagamento) e as buscas salvas *Erros*, *Falhas de pagamento*, *Eventos de pedidos*, *Requisições lentas (> 300 ms)* e *Experimentos de caos*.
+
+O log de acesso traz `http.route`, o template da rota (`/api/products/{id}`), para agregar por rota sem que cada ID vire uma linha diferente.
 
 **Consultas KQL úteis no Kibana**
 
@@ -323,6 +346,15 @@ docker run --rm -v "$PWD":/w -v ezbikes-m2:/root/.m2 \
   -w /w maven:3.9-eclipse-temurin-21 mvn -B verify
 ```
 
+## Integração contínua
+
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda a cada push e pull request:
+
+| Job | Verificações |
+|---|---|
+| **API** | `./mvnw verify` (testes unitários e de integração com Testcontainers) e build da imagem Docker |
+| **Observabilidade** | sintaxe e testes das regras do Prometheus (`promtool`), dashboards, alertas e objetos do Kibana idênticos ao que os scripts geram, scripts do k6 válidos (`k6 inspect`) e `docker-compose.yml` válido |
+
 ## Estrutura
 
 ```
@@ -332,6 +364,9 @@ observability/elk/setup.sh  Retenção (ILM), index template e data view do Kiba
 observability/prometheus/   Configuração de scrape e recording rules (com testes)
 observability/grafana/      Dashboards (gerados por build_dashboards.py) e alertas (build_alerts.py)
 observability/alert-receiver/  Receptor de webhooks que registra as notificações
+observability/kibana/       Buscas salvas e dashboard de logs (gerados por build_saved_objects.py)
+api/src/main/resources/static/  Vitrine (HTML, CSS e JavaScript)
+.github/workflows/ci.yml    Integração contínua
 docs/slo.md                 SLIs, SLOs, error budget, burn rate e política
 docs/evidencias/            Resultados dos testes de carga e do experimento de caos
 load/                       Cenários do k6 (smoke, load, spike, stress, chaos)

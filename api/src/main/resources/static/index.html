@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EZBikes · Bicicletas</title>
+  <meta name="description" content="EZBikes: loja de bicicletas de demonstração (Projeto Aplicado I).">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none' stroke='%231f6feb' stroke-width='5' stroke-linecap='round'%3E%3Ccircle cx='14' cy='42' r='10'/%3E%3Ccircle cx='50' cy='42' r='10'/%3E%3Cpath d='M14 42l10-18h16l10 18'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body data-page="catalog">
+<header class="site-header">
+  <div class="container">
+    <a class="logo" href="index.html">
+      <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="14" cy="42" r="10"/><circle cx="50" cy="42" r="10"/><path d="M14 42l10-18h16l10 18M24 24l8 18h-18M40 24l-4-8h-6M32 42l8-18"/></svg>
+      EZBikes
+    </a>
+    <nav class="nav" aria-label="Principal">
+      <a href="index.html" aria-current="page">Catálogo</a>
+      <a href="carrinho.html">Carrinho <span class="badge" data-cart-count hidden>0</span></a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="container">
+    <h1>Bicicletas</h1>
+    <p class="subtitle">Mountain bikes, speed, urbanas, elétricas e infantis.</p>
+    <div class="filters">
+      <label>Categoria
+        <select id="category"><option value="">Todas</option></select>
+      </label>
+      <label>Marca
+        <select id="brand"><option value="">Todas</option></select>
+      </label>
+    </div>
+    <div id="status" aria-live="polite"></div>
+    <div id="products" class="grid" aria-live="polite"><p class="empty">Carregando…</p></div>
+  </div>
+</main>
+<footer class="site-footer">
+  <div class="container">Loja de demonstração do Projeto Aplicado I · pagamento simulado, nenhum valor é cobrado.</div>
+</footer>
+</body>
+</html>

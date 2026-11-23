@@ -6,6 +6,8 @@
 #     2. Index template para app-logs-*: tipos explícitos dos campos e 0 réplicas (nó único).
 #   setup.sh kibana         -> depois que o Kibana sobe:
 #     3. Data view "EZBikes - logs", pronta para o Discover.
+#     4. Buscas salvas, visualizações e o dashboard "EZBikes · Logs"
+#        (observability/kibana/saved-objects.ndjson, gerado por build_saved_objects.py).
 set -eu
 
 STEP="${1:-all}"
@@ -78,6 +80,7 @@ curl -fsS -X PUT "$ES/_index_template/app-logs" -H 'Content-Type: application/js
         "http": { "properties": {
           "method":      { "type": "keyword" },
           "path":        { "type": "keyword" },
+          "route":       { "type": "keyword" },
           "status":      { "type": "integer" },
           "duration_ms": { "type": "long" }
         } }
@@ -108,6 +111,11 @@ curl -fsS -X POST "$KIBANA/api/data_views/default" \
   -H 'kbn-xsrf: true' -H 'Content-Type: application/json' \
   -d '{"data_view_id": "app-logs", "force": true}' >/dev/null
 
+echo "Importando buscas salvas, visualizações e dashboard..."
+result=$(curl -fsS -X POST "$KIBANA/api/saved_objects/_import?overwrite=true" \
+  -H 'kbn-xsrf: true' -F "file=@/kibana/saved-objects.ndjson")
+echo "$result" | grep -q '"success":true' || { echo "Falha ao importar objetos: $result" >&2; exit 1; }
+echo "Objetos importados."
 }
 
 case "$STEP" in

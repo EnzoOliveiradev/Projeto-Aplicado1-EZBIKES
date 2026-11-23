@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API · testes e imagem
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Testes unitários (surefire) e de integração com Testcontainers/PostgreSQL (failsafe)
+      - name: Testes
+        run: ./mvnw -B verify
+
+      - name: Relatórios dos testes (em caso de falha)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-de-teste
+          path: |
+            api/target/surefire-reports
+            api/target/failsafe-reports
+
+      - name: Imagem Docker
+        run: docker build -t ezbikes-api:ci .
+
+  observabilidade:
+    name: Observabilidade · regras, dashboards e k6
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regras do Prometheus (sintaxe)
+        run: >
+          docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool
+          prom/prometheus:v3.1.0 check rules /rules/recording.yml /rules/alerts.yml
+
+      - name: Regras do Prometheus (testes de SLI e alertas de burn rate)
+        run: >
+          docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool
+          prom/prometheus:v3.1.0 test rules /rules/recording_test.yml /rules/alerts_test.yml
+
+      # Dashboards, alertas do Grafana e objetos do Kibana são gerados por scripts:
+      # o JSON versionado precisa bater com o que os scripts geram.
+      - name: Arquivos gerados estão atualizados
+        run: |
+          python3 observability/grafana/build_dashboards.py
+          python3 observability/grafana/build_alerts.py
+          python3 observability/kibana/build_saved_objects.py
+          git diff --exit-code
+
+      - name: Scripts do k6
+        run: |
+          for script in smoke load spike stress chaos; do
+            docker run --rm -v "$PWD/load:/scripts" grafana/k6:0.57.0 inspect "/scripts/$script.js" > /dev/null
+            echo "ok: $script.js"
+          done
+
+      - name: docker-compose.yml válido
+        run: docker compose config -q
