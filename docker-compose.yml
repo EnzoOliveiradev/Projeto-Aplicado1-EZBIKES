@@ -157,11 +157,21 @@ services:
     depends_on:
       prometheus:
         condition: service_healthy
+      alert-receiver:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"database\": *\"ok\"'"]
       interval: 10s
       timeout: 5s
       retries: 20
+
+  # Recebe as notificações do Grafana Alerting (no lugar de Slack/e-mail) e as registra no log.
+  alert-receiver:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/app/receiver.py"]
+    volumes:
+      - ./observability/alert-receiver/receiver.py:/app/receiver.py:ro
+    mem_limit: 64m
 
 volumes:
   pg_data:

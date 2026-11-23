@@ -1,0 +1,76 @@
+# Testes dos alertas de burn rate:
+#   docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool \
+#     prom/prometheus:v3.1.0 test rules /rules/alerts_test.yml
+rule_files:
+  - recording.yml
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 100 checkouts/min. Durante 60 minutos, 10 deles por minuto falham com 502
+  # (taxa de erro de 9,1% = burn rate de 91x). Depois as falhas param.
+  - name: alerta crítico dispara durante o incidente e se resolve logo depois
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="201"}'
+        values: '0+100x90'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="502"}'
+        values: '0+10x60 600+0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CheckoutErrorBudgetBurnCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              slo: checkout-availability
+              service: ezbikes-api
+            exp_annotations:
+              summary: Checkout consumindo o error budget 14,4x mais rápido que o permitido
+              description: Burn rate acima de 14,4x na última hora e nos últimos 5 minutos. Nesse ritmo, 2% do budget mensal some a cada hora.
+              runbook: Ver falhas no Kibana (event.action:"order.payment_failed") e o painel do gateway. Política - congelar deploys e considerar rollback.
+      # 10 minutos depois do fim das falhas: a janela de 1h ainda mostra burn alto,
+      # mas a de 5m está limpa, então o alerta já não está ativo (reset rápido).
+      - eval_time: 70m
+        alertname: CheckoutErrorBudgetBurnCritical
+        exp_alerts: []
+
+  # Taxa de erro de 0,5% (burn rate 5x): consome budget, mas abaixo dos dois limiares.
+  - name: consumo lento não acorda ninguém
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="201"}'
+        values: '0+199x400'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="502"}'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 390m
+        alertname: CheckoutErrorBudgetBurnCritical
+        exp_alerts: []
+      - eval_time: 390m
+        alertname: CheckoutErrorBudgetBurnHigh
+        exp_alerts: []
+
+  # Taxa de erro de 1% (burn rate 10x) por 7 horas: não chega ao crítico, mas dispara o alto.
+  - name: consumo moderado e persistente gera o alerta de 6x
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="201"}'
+        values: '0+99x430'
+      - series: 'http_server_requests_seconds_count{job="ezbikes-api",method="POST",uri="/api/orders",status="502"}'
+        values: '0+1x430'
+    alert_rule_test:
+      - eval_time: 420m
+        alertname: CheckoutErrorBudgetBurnCritical
+        exp_alerts: []
+      - eval_time: 420m
+        alertname: CheckoutErrorBudgetBurnHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              slo: checkout-availability
+              service: ezbikes-api
+            exp_annotations:
+              summary: Checkout consumindo o error budget 6x mais rápido que o permitido
+              description: Burn rate acima de 6x nas últimas 6 horas e nos últimos 30 minutos (5% do budget em 6 horas).
+              runbook: Abrir chamado para o time no horário comercial e investigar a tendência no dashboard de SLO.

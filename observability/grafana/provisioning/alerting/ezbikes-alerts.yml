@@ -1,0 +1,307 @@
+# GERADO por observability/grafana/build_alerts.py a partir de
+# observability/prometheus/rules/alerts.yml (mesmos limiares, labels e textos). Não edite à mão.
+{
+  "apiVersion": 1,
+  "contactPoints": [
+    {
+      "orgId": 1,
+      "name": "ezbikes-webhook",
+      "receivers": [
+        {
+          "uid": "ezbikes-webhook",
+          "type": "webhook",
+          "disableResolveMessage": false,
+          "settings": {
+            "url": "http://alert-receiver:8000/grafana",
+            "httpMethod": "POST"
+          }
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "orgId": 1,
+      "receiver": "ezbikes-webhook",
+      "group_by": [
+        "alertname",
+        "severity"
+      ],
+      "group_wait": "10s",
+      "group_interval": "1m",
+      "repeat_interval": "1h"
+    }
+  ],
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "ezbikes-slo",
+      "folder": "EZBikes",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "ezbikes-checkout-burn-critical",
+          "title": "Checkout · burn rate crítico (14,4x em 1h e 5m)",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "ezbikes:checkout_burn_rate:rate1h",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "B",
+                "expr": "ezbikes:checkout_burn_rate:rate5m",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "type": "math",
+                "expression": "$A > 14.4 && $B > 14.4"
+              }
+            }
+          ],
+          "for": "1m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "isPaused": false,
+          "labels": {
+            "severity": "critical",
+            "slo": "checkout-availability",
+            "service": "ezbikes-api"
+          },
+          "annotations": {
+            "summary": "Checkout consumindo o error budget 14,4x mais rápido que o permitido",
+            "description": "Burn rate acima de 14,4x na última hora e nos últimos 5 minutos. Nesse ritmo, 2% do budget mensal some a cada hora.",
+            "runbook": "Ver falhas no Kibana (event.action:\"order.payment_failed\") e o painel do gateway. Política - congelar deploys e considerar rollback.",
+            "__dashboardUid__": "ezbikes-slo",
+            "__panelId__": "8"
+          }
+        },
+        {
+          "uid": "ezbikes-checkout-burn-high",
+          "title": "Checkout · burn rate alto (6x em 6h e 30m)",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "ezbikes:checkout_burn_rate:rate6h",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "B",
+                "expr": "ezbikes:checkout_burn_rate:rate30m",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "type": "math",
+                "expression": "$A > 6 && $B > 6"
+              }
+            }
+          ],
+          "for": "5m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "isPaused": false,
+          "labels": {
+            "severity": "warning",
+            "slo": "checkout-availability",
+            "service": "ezbikes-api"
+          },
+          "annotations": {
+            "summary": "Checkout consumindo o error budget 6x mais rápido que o permitido",
+            "description": "Burn rate acima de 6x nas últimas 6 horas e nos últimos 30 minutos (5% do budget em 6 horas).",
+            "runbook": "Abrir chamado para o time no horário comercial e investigar a tendência no dashboard de SLO.",
+            "__dashboardUid__": "ezbikes-slo",
+            "__panelId__": "8"
+          }
+        },
+        {
+          "uid": "ezbikes-catalog-burn-critical",
+          "title": "Catálogo · burn rate de latência crítico (14,4x em 1h e 5m)",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "ezbikes:catalog_latency_burn_rate:rate1h",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "B",
+                "expr": "ezbikes:catalog_latency_burn_rate:rate5m",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "type": "math",
+                "expression": "$A > 14.4 && $B > 14.4"
+              }
+            }
+          ],
+          "for": "1m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "isPaused": false,
+          "labels": {
+            "severity": "critical",
+            "slo": "catalog-latency",
+            "service": "ezbikes-api"
+          },
+          "annotations": {
+            "summary": "Catálogo lento consumindo o error budget de latência 14,4x mais rápido",
+            "description": "Mais de 14,4% das requisições ao catálogo acima de 300 ms na última hora e nos últimos 5 minutos.",
+            "runbook": "Ver saturação (pool de conexões, threads, CPU) no dashboard Golden Signals."
+          }
+        },
+        {
+          "uid": "ezbikes-catalog-p99",
+          "title": "Catálogo · p99 acima de 500 ms",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "max(ezbikes:http_latency_seconds:p99_5m{uri=~\"/api/products.*\"})",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0.5
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "5m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "isPaused": false,
+          "labels": {
+            "severity": "warning",
+            "slo": "catalog-latency",
+            "service": "ezbikes-api"
+          },
+          "annotations": {
+            "summary": "p99 do catálogo acima de 500 ms",
+            "description": "O percentil 99 de uma rota do catálogo passou de 500 ms por 5 minutos.",
+            "runbook": "Ver saturação no dashboard Golden Signals e logs lentos no Kibana (http.duration_ms > 500)."
+          }
+        }
+      ]
+    }
+  ]
+}

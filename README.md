@@ -12,7 +12,7 @@
 | Carrinho, pedidos, estoque transacional e tratamento de erros | ✅ |
 | Logs JSON + ELK (Elasticsearch, Logstash, Kibana) | ✅ |
 | Métricas (Actuator, Micrometer, Prometheus) e recording rules | ✅ |
-| Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ⏳ |
+| Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ✅ |
 | Injeção de falhas e testes de carga com k6 | ⏳ |
 | Vitrine HTML/JS e CI no GitHub Actions | ⏳ |
 | Evidências, SLOs documentados e reflexão crítica | ⏳ |
@@ -42,6 +42,7 @@ flowchart LR
     ES --> KB[Kibana]
     PR[Prometheus] -- "scrape :8081/actuator/prometheus" --> API
     GF[Grafana] --> PR
+    GF -- "webhook" --> AR[alert-receiver]
 ```
 
 ## Como executar
@@ -61,7 +62,7 @@ docker compose up -d --build
 | Health check | http://127.0.0.1:8081/actuator/health |
 | Métricas (formato Prometheus) | http://127.0.0.1:8081/actuator/prometheus |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (usuário `admin`, senha `ezbikes`, configuráveis no `.env`) |
+| Grafana | http://localhost:3000 (usuário `admin`, senha `ezbikes`, configuráveis no `.env`) → Dashboards → EZBikes |
 | Kibana (logs) | http://localhost:5601 → Discover → data view **EZBikes - logs** |
 | Elasticsearch | http://localhost:9200 |
 
@@ -204,7 +205,52 @@ sum by (status) (rate(ezbikes_orders_total[5m]))             # pedidos por resul
 increase(ezbikes_order_value_reais_sum[1h])                  # receita da última hora
 ```
 
-O Grafana já sobe com o datasource do Prometheus provisionado (`uid: prometheus`) e a pasta **EZBikes**, onde ficarão os dashboards versionados.
+## Dashboards e alertas (Grafana)
+
+O Grafana sobe com o datasource, os dashboards e os alertas **provisionados como código** (nada é configurado à mão na interface). Os dashboards ficam na pasta **EZBikes**:
+
+| Dashboard | Conteúdo |
+|---|---|
+| **EZBikes · Golden Signals** | Latência (p50/p95/p99 geral e p99 por rota, com linha de 300 ms), tráfego por rota, erros (5xx em % e 4xx × 5xx por classe) e saturação (CPU, heap, pool de conexões, threads do Tomcat) |
+| **EZBikes · SLO e Error Budget** | Para cada SLO: SLI atual, error budget restante, burn rate de 1h e 6h, horas até esgotar o budget, gráfico do burn rate nas janelas de 5m/1h/6h com os limiares de 6x e 14,4x e lista de alertas. A variável **Janela do SLO** troca 30d por 1d, 6h ou 1h |
+| **EZBikes · Negócio** | Pedidos pagos, receita, ticket médio e taxa de aprovação do checkout; pedidos por resultado; duração do checkout; latência e falhas do gateway; itens no carrinho por categoria; produtos com menor estoque |
+
+Os dashboards são gerados por [`observability/grafana/build_dashboards.py`](observability/grafana/build_dashboards.py) e o JSON resultante é versionado. Para alterar, edite o script e rode `python observability/grafana/build_dashboards.py`.
+
+**Convenções visuais:** números principais em indicadores únicos, tendências em séries no tempo, nunca dois eixos Y no mesmo gráfico (medidas de escalas diferentes ficam lado a lado), cores categóricas em ordem fixa e cores de status (verde, amarelo, laranja e vermelho) reservadas para estados, sempre com rótulo.
+
+### Alertas de burn rate
+
+A definição completa dos SLOs, da política de error budget e dos alertas está em **[docs/slo.md](docs/slo.md)**.
+
+| Alerta | Condição | Severidade |
+|---|---|---|
+| Checkout · burn rate crítico | burn > 14,4x em **1h e 5m**, por 1 min | crítico |
+| Checkout · burn rate alto | burn > 6x em **6h e 30m**, por 5 min | alto |
+| Catálogo · burn rate de latência crítico | burn de latência > 14,4x em 1h e 5m | crítico |
+| Catálogo · p99 acima de 500 ms | por 5 min | alto |
+
+- **Fonte única:** os alertas são escritos uma vez em [`alerts.yml`](observability/prometheus/rules/alerts.yml), testados com `promtool` ([`alerts_test.yml`](observability/prometheus/rules/alerts_test.yml)) e convertidos para o Grafana Alerting por [`build_alerts.py`](observability/grafana/build_alerts.py). O Prometheus também os avalia (http://localhost:9090/alerts), como segunda visão.
+- **Notificação:** o contact point `ezbikes-webhook` envia para o serviço `alert-receiver`, que registra cada notificação em JSON. Ele faz o papel de Slack ou e-mail na demonstração: `docker compose logs alert-receiver`.
+- **Anotações:** os alertas de checkout aparecem marcados no gráfico de burn rate do dashboard de SLO.
+
+**Validação (22/11/2026, horários em UTC):** com o gateway falhando em 20% dos pagamentos e tráfego contínuo:
+
+| Momento | Evento |
+|---|---|
+| 00:16:06 | início das falhas |
+| 00:17:52 | alerta crítico em *Pending* |
+| 00:18:55 | alerta crítico em *Firing* (burn rate de 205x em 1h e em 5m) e notificação recebida pelo `alert-receiver` |
+| 00:20:28 | falhas encerradas (taxa de falha volta a 0%) |
+| 00:22:57 | alerta de 6x também dispara: a janela de 30m ainda contém as falhas |
+| 00:25:55 | alerta crítico **resolvido** e notificação de resolução recebida. Nesse momento o burn rate de 5m era 0x e o de 1h ainda era 73,8x: é o reset rápido que a janela curta garante |
+
+Os testes do `promtool` cobrem os mesmos comportamentos com dados sintéticos.
+
+```bash
+# Testes das regras (recording + alertas)
+docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool   prom/prometheus:v3.1.0 test rules /rules/recording_test.yml /rules/alerts_test.yml
+```
 
 ## Testes
 
@@ -232,6 +278,8 @@ api/                        API Spring Boot (código, migrações Flyway, Docker
 observability/logstash/     Pipeline do Logstash
 observability/elk/setup.sh  Retenção (ILM), index template e data view do Kibana
 observability/prometheus/   Configuração de scrape e recording rules (com testes)
-observability/grafana/      Provisionamento do Grafana e dashboards (JSON)
+observability/grafana/      Dashboards (gerados por build_dashboards.py) e alertas (build_alerts.py)
+observability/alert-receiver/  Receptor de webhooks que registra as notificações
+docs/slo.md                 SLIs, SLOs, error budget, burn rate e política
 docker-compose.yml          Orquestração local
 ```

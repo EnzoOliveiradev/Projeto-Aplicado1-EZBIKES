@@ -7,6 +7,8 @@ global:
 
 rule_files:
   - /etc/prometheus/rules/recording.yml
+  # Espelho dos alertas do Grafana (visíveis em /alerts; quem notifica é o Grafana).
+  - /etc/prometheus/rules/alerts.yml
 
 scrape_configs:
   # API: Actuator na porta de gestão 8081, acessível só pela rede interna do compose.
