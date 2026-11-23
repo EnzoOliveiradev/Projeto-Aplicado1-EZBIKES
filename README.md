@@ -4,21 +4,21 @@
 
 **EZBikes** é uma loja virtual de bicicletas construída como um sistema **observável**: além de vender, ela produz logs estruturados, métricas de negócio e de desempenho, SLOs com error budget e alertas de burn rate. O projeto foi desenvolvido para o Projeto Aplicado I da pós-graduação (disciplina *Observabilidade, SRE e Engenharia de Confiabilidade de Sistemas*).
 
-> 🚧 Em construção. Esta página será ampliada a cada etapa do cronograma até a entrega.
+## Documentação
 
-## Status do cronograma
-
-| Etapa | Situação |
+| Documento | Conteúdo |
 |---|---|
-| Esqueleto Spring Boot, Docker Compose, PostgreSQL, Flyway e catálogo inicial | ✅ |
-| Carrinho, pedidos, estoque transacional e tratamento de erros | ✅ |
-| Logs JSON + ELK (Elasticsearch, Logstash, Kibana) | ✅ |
-| Métricas (Actuator, Micrometer, Prometheus) e recording rules | ✅ |
-| Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ✅ |
-| Injeção de falhas e testes de carga com k6 | ✅ |
-| Vitrine HTML/JS e CI no GitHub Actions | ✅ |
-| Evidências (prints e resultados) e SLOs documentados | ✅ |
-| Reflexão crítica, roteiro da demonstração e revisão final | ⏳ |
+| [docs/slo.md](docs/slo.md) | SLIs, SLOs, error budget, burn rate, alertas e política de error budget |
+| [docs/evidencias](docs/evidencias/README.md) | Prints de todos os dashboards, resultados dos testes de carga e dos experimentos de caos |
+| [docs/reflexao-critica.md](docs/reflexao-critica.md) | Respostas às perguntas de discussão das aulas e lições aprendidas |
+| [docs/runbook-demo.md](docs/runbook-demo.md) | Roteiro da demonstração (~15 min), com comandos e plano B |
+
+## Resultados em resumo
+
+- **Alerta de burn rate validado com k6:** com 5% de falha no pagamento, o alerta crítico (14,4x em 1h e 5m) disparou e notificou em poucos minutos e resolveu ~4 minutos depois do fim da falha, com a janela de 1h ainda alta.
+- **Ponto de ruptura:** ~1.100 req/s nesta máquina, limitado pelo pool de conexões do banco, com CPU em 22% e nenhum erro 5xx: a loja ficou lenta, não caiu.
+- **Falso positivo encontrado e corrigido:** um único checkout com falha num período sem tráfego disparou um alerta (burn de 500x); os alertas passaram a exigir volume mínimo, com teste.
+- **Tudo como código e testado:** 44 testes da API (Testcontainers), testes das regras de SLO e de alerta com `promtool`, dashboards e alertas gerados por script e verificados no CI.
 
 ## Mapeamento: conteúdo da pós → implementação
 
@@ -34,7 +34,7 @@
 | Burn Rate | Alertas multi-janela sobre consumo acelerado do budget |
 | k6 | Simulação de múltiplos clientes acessando a loja |
 
-## Arquitetura (estado atual)
+## Arquitetura
 
 ```mermaid
 flowchart LR
@@ -46,13 +46,16 @@ flowchart LR
     PR[Prometheus] -- "scrape :8081/actuator/prometheus" --> API
     GF[Grafana] --> PR
     GF -- "webhook" --> AR[alert-receiver]
+    K6[k6] -- "carga e experimentos de caos" --> API
 ```
+
+Tudo roda localmente com Docker Compose: nenhum serviço de nuvem é necessário.
 
 ## Como executar
 
 Pré-requisitos: Docker com Docker Compose e **pelo menos 4 GB de memória** disponíveis para o Docker (o Elasticsearch, o Logstash e o Kibana são os serviços mais pesados). Não é preciso ter Java nem Maven instalados, porque a API é compilada dentro do container.
 
-A primeira subida leva alguns minutos: o Kibana demora a ficar disponível.
+A primeira subida leva alguns minutos (o Kibana é o mais lento). Para a apresentação, siga o [roteiro da demonstração](docs/runbook-demo.md).
 
 ```bash
 docker compose up -d --build
@@ -70,7 +73,9 @@ docker compose up -d --build
 | Kibana (logs) | http://localhost:5601 → Dashboards → **EZBikes · Logs**, ou Discover → data view **EZBikes - logs** |
 | Elasticsearch | http://localhost:9200 |
 
-Para parar e apagar os dados: `docker compose down -v`.
+Para parar: `docker compose down`. Para parar e apagar todos os dados: `docker compose down -v`.
+
+Variáveis opcionais (veja [`.env.example`](.env.example)): senha do Grafana, token da API administrativa, taxa inicial de falha do pagamento e `GRAFANA_ANONYMOUS_ENABLED=true` para ver os dashboards sem login (somente leitura).
 
 ## Vitrine
 
@@ -342,7 +347,7 @@ cd api
 ./mvnw verify
 ```
 
-Os testes de integração usam **Testcontainers** com PostgreSQL 16 real. Eles verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro), as métricas de negócio (cada resultado do checkout incrementa a série certa e os nomes expostos são os usados pelas recording rules), a API administrativa (token obrigatório) e as falhas injetadas (entram nas métricas com a rota correta) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
+São **44 testes**: 13 unitários e 31 de integração. Os de integração usam **Testcontainers** com PostgreSQL 16 real e verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro), as métricas de negócio (cada resultado do checkout incrementa a série certa e os nomes expostos são os usados pelas recording rules), a API administrativa (token obrigatório) e as falhas injetadas (entram nas métricas com a rota correta) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
 
 Sem Java instalado, rode os testes dentro de um container Maven:
 
@@ -376,7 +381,28 @@ observability/kibana/       Buscas salvas e dashboard de logs (gerados por build
 api/src/main/resources/static/  Vitrine (HTML, CSS e JavaScript)
 .github/workflows/ci.yml    Integração contínua
 docs/slo.md                 SLIs, SLOs, error budget, burn rate e política
-docs/evidencias/            Resultados dos testes de carga e do experimento de caos
+docs/evidencias/            Prints, resultados dos testes de carga e dos experimentos de caos
+docs/reflexao-critica.md    Perguntas de discussão das aulas e lições aprendidas
+docs/runbook-demo.md        Roteiro da demonstração
 load/                       Cenários do k6 (smoke, load, spike, stress, chaos)
 docker-compose.yml          Orquestração local
 ```
+
+## Limitações e próximos passos
+
+Limitações conscientes desta versão:
+
+- **Pagamento simulado:** nenhum valor é cobrado; o gateway falso tem latência e taxa de falha configuráveis para os experimentos.
+- **Sem autenticação de clientes:** o checkout recebe nome e e-mail; não há contas de usuário.
+- **Carrinho em memória:** com mais de uma réplica da API, ele precisaria ir para Redis ou para o banco.
+- **Um único serviço e um nó de cada componente:** sem alta disponibilidade do Prometheus nem do Elasticsearch, adequado para o escopo local.
+- **Janela de 30 dias:** o projeto foi construído em menos tempo que a janela do SLO; o dashboard permite ver as janelas de 1h, 6h e 1d.
+- **Guarda de volume dos alertas:** com tráfego quase nulo, nem uma queda total dispara o alerta de burn rate.
+
+Próximos passos (detalhados em [docs/reflexao-critica.md](docs/reflexao-critica.md#o-que-eu-faria-a-seguir)):
+
+- tracing distribuído com OpenTelemetry (o `trace_id` dos logs já está pronto para isso);
+- monitoramento sintético do checkout, para cobrir o caso de pouco tráfego;
+- cache do catálogo, a alavanca indicada pelo teste de estresse;
+- frontend completo (Next.js) e implantação em Kubernetes.
+

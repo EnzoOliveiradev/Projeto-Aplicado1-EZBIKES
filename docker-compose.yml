@@ -69,12 +69,15 @@ services:
       - ./observability/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
     ports:
       - "50000:50000"
-    mem_limit: 800m
+    # Com heap de 256 MB, o processo usa ~790 MB (JVM + pipeline); 1 GB dá folga.
+    mem_limit: 1000m
     depends_on:
       elk-setup:
         condition: service_completed_successfully
+    # Saudável = aceitando logs na porta 50000, que é o que a API usa. A API de monitoramento
+    # (9600) chegou a ficar sem responder com o pipeline funcionando normalmente.
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9600/_node/pipelines/main >/dev/null || exit 1"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/50000"]
       interval: 10s
       timeout: 5s
       retries: 30
