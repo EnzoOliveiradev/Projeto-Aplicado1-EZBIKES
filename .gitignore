@@ -18,4 +18,5 @@ Thumbs.db
 
 # Local env / results
 .env
-load/results/
+load/results/*
+!load/results/.gitkeep

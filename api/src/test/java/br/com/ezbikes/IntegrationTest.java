@@ -1,5 +1,6 @@
 package br.com.ezbikes;
 
+import br.com.ezbikes.chaos.ChaosState;
 import br.com.ezbikes.payment.PaymentGateway;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,10 +20,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * cada classe de teste, enquanto o contexto Spring em cache continuaria apontando para ele.
  * O Ryuk do Testcontainers remove o container quando a JVM termina.
  */
-@SpringBootTest
+@SpringBootTest(properties = {"ezbikes.admin.enabled=true", "ezbikes.admin.token=" + IntegrationTest.ADMIN_TOKEN})
 @AutoConfigureMockMvc
 @AutoConfigureObservability(tracing = false) // registra o PrometheusMeterRegistry também nos testes
 public abstract class IntegrationTest {
+
+    protected static final String ADMIN_TOKEN = "token-de-teste-123";
 
     @ServiceConnection
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
@@ -38,8 +41,12 @@ public abstract class IntegrationTest {
     @Autowired
     protected JdbcTemplate jdbc;
 
+    @Autowired
+    protected ChaosState chaos;
+
     @BeforeEach
     void resetDatabase() {
+        chaos.reset();
         jdbc.update("delete from order_items");
         jdbc.update("delete from orders");
         jdbc.update("update products set stock = 10");

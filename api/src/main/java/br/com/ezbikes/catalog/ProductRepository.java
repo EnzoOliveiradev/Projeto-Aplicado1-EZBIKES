@@ -34,6 +34,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("select p.stock from Product p where p.id = :id")
     int findStockById(@Param("id") long id);
 
+    /** Repõe o estoque de todo o catálogo (API administrativa, usada antes dos testes de carga). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "update products set stock = :qty, version = version + 1", nativeQuery = true)
+    int setAllStock(@Param("qty") int qty);
+
     /** Devolve unidades ao estoque (por exemplo, quando o pagamento falha). */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """

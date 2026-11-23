@@ -1,5 +1,6 @@
 package br.com.ezbikes.common;
 
+import br.com.ezbikes.chaos.ChaosInjectedException;
 import br.com.ezbikes.order.OutOfStockException;
 import br.com.ezbikes.payment.PaymentFailedException;
 import org.slf4j.Logger;
@@ -52,6 +53,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             pd.setProperty("orderId", ex.getOrderId());
         }
         return pd;
+    }
+
+    @ExceptionHandler(ChaosInjectedException.class)
+    ProblemDetail chaos(ChaosInjectedException ex) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Serviço indisponível", ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

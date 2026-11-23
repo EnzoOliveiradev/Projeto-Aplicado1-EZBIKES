@@ -13,7 +13,7 @@
 | Logs JSON + ELK (Elasticsearch, Logstash, Kibana) | ✅ |
 | Métricas (Actuator, Micrometer, Prometheus) e recording rules | ✅ |
 | Dashboards Grafana (Golden Signals, SLO/Error Budget, Negócio) e alertas de burn rate | ✅ |
-| Injeção de falhas e testes de carga com k6 | ⏳ |
+| Injeção de falhas e testes de carga com k6 | ✅ |
 | Vitrine HTML/JS e CI no GitHub Actions | ⏳ |
 | Evidências, SLOs documentados e reflexão crítica | ⏳ |
 
@@ -94,7 +94,28 @@ curl -X POST http://localhost:8080/api/orders -H "Content-Type: application/json
 2. **Pagamento:** chama o gateway simulado *fora* de transação, para não prender conexões do pool enquanto espera uma dependência externa.
 3. **Conclusão:** marca `PAID`; se o gateway falhar, marca `PAYMENT_FAILED` e devolve o estoque.
 
-O pagamento é **simulado** (não há integração financeira). A taxa de falha do gateway é configurável por `EZBIKES_PAYMENT_FAILURE_RATE` (0 a 1) e servirá para os experimentos de confiabilidade.
+O pagamento é **simulado** (não há integração financeira). A taxa de falha do gateway começa com o valor de `EZBIKES_PAYMENT_FAILURE_RATE` (0 a 1) e pode ser alterada em tempo de execução pela API administrativa.
+
+### API administrativa (experimentos de caos)
+
+Ligada no compose de demonstração (`EZBIKES_ADMIN_ENABLED=true`) e protegida pelo cabeçalho `X-Admin-Token` (variável `EZBIKES_ADMIN_TOKEN`, padrão `demo-admin-token-troque`). Fora do compose ela fica desligada e as rotas nem existem.
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/admin/chaos` | Falhas ativas |
+| PUT | `/admin/chaos` | `{"paymentFailureRate": 0.05, "errorRate": 0, "extraLatencyMs": 0, "latencyScope": "ALL"}` |
+| DELETE | `/admin/chaos` | Desliga todas as falhas |
+| POST | `/admin/stock/replenish` | `{"quantity": 1000}` repõe o estoque de todo o catálogo |
+
+- `paymentFailureRate`: o gateway de pagamento falha (502) nessa proporção dos checkouts.
+- `errorRate`: requisições a `/api/**` falham com 503 nessa proporção.
+- `extraLatencyMs` + `latencyScope` (`ALL`, `CATALOG`, `CHECKOUT`): atraso adicional nas rotas escolhidas.
+
+As falhas são aplicadas por um *interceptor* do Spring MVC, depois do mapeamento da rota: as métricas registram a URI real (`/api/products/{id}`) e a falha injetada entra no SLI exatamente como uma falha de verdade. Cada mudança gera um log `event.action: "chaos.updated"`.
+
+```bash
+curl -X PUT http://localhost:8080/admin/chaos -H "X-Admin-Token: demo-admin-token-troque"   -H "Content-Type: application/json" -d '{"paymentFailureRate": 0.05}'
+```
 
 ### Erros e o error budget
 
@@ -252,6 +273,37 @@ Os testes do `promtool` cobrem os mesmos comportamentos com dados sintéticos.
 docker run --rm -v "$PWD/observability/prometheus/rules:/rules" --entrypoint promtool   prom/prometheus:v3.1.0 test rules /rules/recording_test.yml /rules/alerts_test.yml
 ```
 
+## Testes de carga e experimentos de caos (k6)
+
+Os cenários ficam em [`load/`](load/) e rodam no container do k6 (não é preciso instalá-lo):
+
+```bash
+docker compose run --rm k6 run --summary-export /scripts/results/smoke.json /scripts/smoke.js
+```
+
+| Script | Perfil | Objetivo |
+|---|---|---|
+| `smoke.js` | 2 usuários, 1 min | sanidade antes dos testes pesados |
+| `load.js` | 10 → 50 → 100 usuários, 10 min | comportamento em carga crescente, com thresholds iguais aos SLOs |
+| `spike.js` | 0 → 150 usuários em 10 s | pico repentino e recuperação |
+| `stress.js` | taxa de chegada crescente | encontrar o ponto de ruptura; para sozinho ao violar o SLO de latência |
+| `chaos.js` | 8 jornadas/s + falha injetada | consumir o error budget e validar os alertas (variáveis `EXPERIMENT` = payment, latency ou errors; `RATE`; `DURATION`) |
+
+A jornada simulada (`lib/scenario.js`) navega pelo catálogo, abre um produto e, em parte das iterações, adiciona ao carrinho e fecha o pedido. Cada requisição leva um `X-Request-Id` iniciado por `k6-`, que vira o `trace_id` nos logs. O 409 (sem estoque) é tratado como resposta esperada, o mesmo critério do SLI.
+
+### Resultados
+
+| Teste | Requisições | Falhas | Catálogo | Checkout |
+|---|---|---|---|---|
+| smoke | 223 | 0% | p95 14 ms | p95 140 ms |
+| load (até 100 usuários) | 48.915 | 0% | p95 5,7 ms | p95 130 ms |
+| spike (150 usuários) | 57.095 (710 req/s) | 0% | p95 3,0 ms | p95 125 ms |
+| stress | 139.876 (pico ~1.140 req/s) | 0% | **p99 > 300 ms** (interrompido) | p95 352 ms |
+
+**Ponto de ruptura (~1.100 req/s nesta máquina):** o primeiro recurso a esgotar foi o **pool de conexões do banco** (10 de 10 em uso, 174 requisições esperando). Em seguida as 200 threads do Tomcat se esgotaram e o p99 do catálogo saltou de 5 ms para 355 ms, **com a CPU em 22% e nenhum erro 5xx**: a loja não caiu, ficou lenta. Detalhes e tabelas por minuto em [docs/evidencias/testes-de-carga.md](docs/evidencias/testes-de-carga.md).
+
+**Experimento de caos (5% de falha no pagamento):** o alerta crítico de burn rate disparou e notificou em ~5 minutos (burn de 51x na janela de 5m), e resolveu 4 minutos depois de a falha ser removida, embora a janela de 1h continuasse em 18x. Linha do tempo completa em [docs/evidencias/experimento-caos.md](docs/evidencias/experimento-caos.md).
+
 ## Testes
 
 ```bash
@@ -259,7 +311,7 @@ cd api
 ./mvnw verify
 ```
 
-Os testes de integração usam **Testcontainers** com PostgreSQL 16 real. Eles verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro), as métricas de negócio (cada resultado do checkout incrementa a série certa e os nomes expostos são os usados pelas recording rules) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
+Os testes de integração usam **Testcontainers** com PostgreSQL 16 real. Eles verificam o formato dos logs (JSON válido, `trace_id` em todos os logs da requisição, `order_id` nos eventos, status numérico e nenhum e-mail em texto claro), as métricas de negócio (cada resultado do checkout incrementa a série certa e os nomes expostos são os usados pelas recording rules), a API administrativa (token obrigatório) e as falhas injetadas (entram nas métricas com a rota correta) e cobrem: pedido pago e baixa de estoque, rollback quando falta estoque, devolução do estoque quando o pagamento falha, checkout pelo carrinho, mapeamento dos status HTTP e **20 compras concorrentes** de um produto com 5 unidades (exatamente 5 são vendidas).
 
 Sem Java instalado, rode os testes dentro de um container Maven:
 
@@ -281,5 +333,7 @@ observability/prometheus/   Configuração de scrape e recording rules (com test
 observability/grafana/      Dashboards (gerados por build_dashboards.py) e alertas (build_alerts.py)
 observability/alert-receiver/  Receptor de webhooks que registra as notificações
 docs/slo.md                 SLIs, SLOs, error budget, burn rate e política
+docs/evidencias/            Resultados dos testes de carga e do experimento de caos
+load/                       Cenários do k6 (smoke, load, spike, stress, chaos)
 docker-compose.yml          Orquestração local
 ```

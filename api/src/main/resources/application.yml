@@ -32,8 +32,12 @@ ezbikes:
   environment: ${EZBIKES_ENVIRONMENT:local}
   logging:
     logstash-destination: ${EZBIKES_LOGSTASH_DESTINATION:logstash:50000}
+  admin:
+    # API /admin/** (injeção de falhas e reposição de estoque): desligada por padrão.
+    enabled: ${EZBIKES_ADMIN_ENABLED:false}
+    token: ${EZBIKES_ADMIN_TOKEN:}
   payment:
-    # Probabilidade de falha do gateway simulado (0 a 1). Ajustável em runtime a partir do dia 6 (chaos).
+    # Probabilidade inicial de falha do gateway simulado (0 a 1); ajustável depois em PUT /admin/chaos.
     failure-rate: ${EZBIKES_PAYMENT_FAILURE_RATE:0.0}
     min-latency-ms: 30
     max-latency-ms: 120

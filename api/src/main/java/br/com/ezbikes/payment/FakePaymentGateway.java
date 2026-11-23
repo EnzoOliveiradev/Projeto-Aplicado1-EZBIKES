@@ -1,5 +1,6 @@
 package br.com.ezbikes.payment;
 
+import br.com.ezbikes.chaos.ChaosState;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -8,15 +9,17 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Gateway simulado: não movimenta dinheiro. Introduz latência e uma taxa de falha
- * configurável para que o checkout tenha comportamento realista de dependência externa.
+ * ajustável em tempo de execução ({@link ChaosState}), como uma dependência externa real.
  */
 @Component
 public class FakePaymentGateway implements PaymentGateway {
 
     private final PaymentProperties properties;
+    private final ChaosState chaos;
 
-    public FakePaymentGateway(PaymentProperties properties) {
+    public FakePaymentGateway(PaymentProperties properties, ChaosState chaos) {
         this.properties = properties;
+        this.chaos = chaos;
     }
 
     @Override
@@ -24,7 +27,7 @@ public class FakePaymentGateway implements PaymentGateway {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         sleep(random.nextInt(properties.minLatencyMs(), properties.maxLatencyMs() + 1));
 
-        if (random.nextDouble() < properties.failureRate()) {
+        if (random.nextDouble() < chaos.paymentFailureRate()) {
             throw new PaymentFailedException("gateway_unavailable");
         }
     }
