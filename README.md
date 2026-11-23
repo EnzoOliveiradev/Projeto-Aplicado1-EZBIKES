@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/EnzoOliveiradev/Projeto-Aplicado1-EZBIKES/actions/workflows/ci.yml/badge.svg)](https://github.com/EnzoOliveiradev/Projeto-Aplicado1-EZBIKES/actions/workflows/ci.yml)
 
-**EZBikes** é uma loja virtual de bicicletas construída como um sistema **observável**: além de vender, ela produz logs estruturados, métricas de negócio e de desempenho, SLOs com error budget e alertas de burn rate. O projeto foi desenvolvido para o Projeto Aplicado I da pós-graduação (disciplina *Observabilidade, SRE e Engenharia de Confiabilidade de Sistemas*).
+**EZBikes** é uma loja virtual de bicicletas construída como um sistema **observável**: além de vender, ela produz logs estruturados, métricas de negócio e de desempenho, SLOs com error budget e alertas de burn rate. O projeto foi desenvolvido para o Projeto Aplicado I da pós-graduação.
 
 ## Documentação
 
